@@ -73,14 +73,14 @@ before-all = [
     "cmake --build /tmp/opencv/build -j$(nproc) && cmake --install /tmp/opencv/build",
     # Build Ceres from source
     "git clone --depth 1 --branch 2.2.0 https://github.com/ceres-solver/ceres-solver.git /tmp/ceres",
-    "cmake -S /tmp/ceres -B /tmp/ceres/build -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DMINIGLOG=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_BUILD_TYPE=Release",
+    "cmake -S /tmp/ceres -B /tmp/ceres/build -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DMINIGLOG=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_BUILD_TYPE=Release -DEigen3_DIR=/usr/share/eigen3",
     "cmake --build /tmp/ceres/build -j$(nproc) && cmake --install /tmp/ceres/build",
     # Build OpenColorIO from source
     "git clone --depth 1 --branch v2.5.1 https://github.com/AcademySoftwareFoundation/OpenColorIO.git /tmp/ocio",
     "cmake -S /tmp/ocio -B /tmp/ocio/build -DOCIO_BUILD_APPS=OFF -DOCIO_BUILD_TESTS=OFF -DOCIO_BUILD_GPU_TESTS=OFF -DOCIO_BUILD_PYTHON=OFF -DCMAKE_BUILD_TYPE=Release",
     "cmake --build /tmp/ocio/build -j$(nproc) && cmake --install /tmp/ocio/build",
 ]
-environment = { CMAKE_PREFIX_PATH = "/usr/local" }
+environment = { CMAKE_PREFIX_PATH = "/usr/local", Eigen3_DIR="/usr/share/eigen3" }
 
 [tool.cibuildwheel.macos]
 before-all = [
