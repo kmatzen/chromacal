@@ -51,7 +51,9 @@ Detecting the ColorChecker in the *corrected* image and solving again should pro
 # Apply calibration
 corrected = solver.infer(rgb_image)  # linear RGB float64
 
-# Encode as sRGB for storage
+# detect() requires uint8, so we must quantize. Linear values in 8-bit
+# have poor precision in the darks (causing patch detection failures),
+# so we apply the sRGB transfer function before quantizing.
 corrected_srgb = linear_to_srgb(corrected)
 corrected_8bit = (corrected_srgb * 255).astype(np.uint8)
 
@@ -60,11 +62,11 @@ patches2 = chromacal.detect(cv2.cvtColor(corrected_8bit, cv2.COLOR_RGB2BGR))
 solver2 = chromacal.Solver()
 solver2.solve(patches2)
 
-print(solver2.get_ccm())   # should be near identity
-print(solver2.get_luma_params())  # should be near [0, 1, 0, 0]
+print(solver2.get_ccm())        # near identity
+print(solver2.get_luma_params()) # absorbs sRGB transfer function
 ```
 
-**Re-detection CCM:**
+**Re-detection CCM (24/24 patches):**
 ```
 [[ 1.006  -0.011   0.013]
  [-0.003   0.999   0.010]
@@ -73,7 +75,7 @@ print(solver2.get_luma_params())  # should be near [0, 1, 0, 0]
 
 **Re-detection tone curve:** `[0.013, 2.316, 0.116, 0.018]`
 
-The CCM is within 1.3% of the identity matrix. The tone curve departs from `[0, 1, 0, 0]` because the corrected image is stored as sRGB (with the standard IEC 61966-2-1 transfer function), so the re-detected curve absorbs that encoding.
+The CCM is within 1.3% of the identity matrix — the color correction has already been applied. The tone curve departs from `[0, 1, 0, 0]` because it absorbs the sRGB transfer function applied during the uint8 quantization step.
 
 ## Usage
 
