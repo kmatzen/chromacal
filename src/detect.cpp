@@ -282,8 +282,42 @@ std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure,
     if (checkers.empty()) return result;
 
     auto checker = checkers[0];
-    std::vector<cv::Point2f> charts = checker->getColorCharts();
-    size_t num_patches = charts.size() / 4;
+
+    // Compute per-patch quad corners from the chart bounding box.
+    // getColorCharts() is unavailable before OpenCV 4.8, so we derive
+    // the patch grid ourselves using a perspective transform of the
+    // MCC24 6-column x 4-row layout.
+    std::vector<cv::Point2f> box = checker->getBox();
+    const int cols = 6, rows = 4;
+    const size_t num_patches = cols * rows;
+
+    // Ideal unit-square corners matching the order returned by getBox()
+    std::vector<cv::Point2f> ideal_box = {
+        {0.f, 0.f},
+        {static_cast<float>(cols), 0.f},
+        {static_cast<float>(cols), static_cast<float>(rows)},
+        {0.f, static_cast<float>(rows)}
+    };
+    cv::Mat H = cv::getPerspectiveTransform(ideal_box, box);
+
+    // Map each patch's four corners through the transform
+    std::vector<cv::Point2f> charts;
+    charts.reserve(num_patches * 4);
+    // Shrink factor so we sample inside each patch, not at the grid lines
+    const float margin = 0.15f;
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            std::vector<cv::Point2f> src = {
+                {c + margin,       r + margin},
+                {c + 1 - margin,   r + margin},
+                {c + 1 - margin,   r + 1 - margin},
+                {c + margin,       r + 1 - margin}
+            };
+            std::vector<cv::Point2f> dst;
+            cv::perspectiveTransform(src, dst, H);
+            charts.insert(charts.end(), dst.begin(), dst.end());
+        }
+    }
 
     // Convert to RGB float [0, 1]
     cv::Mat rgb_float;

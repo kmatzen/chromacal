@@ -14,6 +14,69 @@ chromacal fits a **log-polynomial tone curve + 3x3 color correction matrix** to 
 - **Perceptually weights** — darker and more saturated colors get higher weight (where cameras struggle most)
 - **Generates OCIO 3D LUTs** — apply calibration via OpenColorIO for GPU-accelerated or batch processing
 
+## Example
+
+Before and after calibration on a GoPro Hero10 frame (ColorChecker visible in scene):
+
+| Before | After |
+|--------|-------|
+| ![Before calibration](docs/before.png) | ![After calibration](docs/after.png) |
+
+**Detected patches:** 24 of 24
+
+**Fitted tone curve coefficients:** `[1.377, 3.479, 0.739, 0.072]`
+
+**Fitted color correction matrix:**
+```
+[[ 1.586  -0.638  -0.214]
+ [-0.303   1.826  -0.294]
+ [-0.014  -0.449   3.000]]
+```
+
+The off-diagonal entries show the GoPro sensor has significant blue-channel crosstalk that the CCM corrects. The tone curve coefficients (far from the identity `[0, 1, 0, 0]`) indicate the camera's built-in processing applies a heavy tonal response.
+
+### Patch comparison
+
+Detected patch colors before and after calibration, compared to ground truth:
+
+![Patch comparison](docs/patches.png)
+
+The "after" row closely matches the reference — saturated colors are recovered and the grayscale ramp is neutral.
+
+### Re-detection identity check
+
+Detecting the ColorChecker in the *corrected* image and solving again should produce a near-identity transform, confirming the calibration was applied correctly:
+
+```python
+# Apply calibration
+corrected = solver.infer(rgb_image)  # linear RGB float64
+
+# detect() requires uint8, so we must quantize. Linear values in 8-bit
+# have poor precision in the darks (causing patch detection failures),
+# so we apply the sRGB transfer function before quantizing.
+corrected_srgb = linear_to_srgb(corrected)
+corrected_8bit = (corrected_srgb * 255).astype(np.uint8)
+
+# Re-detect and re-solve on the corrected image
+patches2 = chromacal.detect(cv2.cvtColor(corrected_8bit, cv2.COLOR_RGB2BGR))
+solver2 = chromacal.Solver()
+solver2.solve(patches2)
+
+print(solver2.get_ccm())        # near identity
+print(solver2.get_luma_params()) # absorbs sRGB transfer function
+```
+
+**Re-detection CCM (24/24 patches):**
+```
+[[ 1.006  -0.011   0.013]
+ [-0.003   0.999   0.010]
+ [ 0.005  -0.001   0.999]]
+```
+
+**Re-detection tone curve:** `[0.013, 2.316, 0.116, 0.018]`
+
+The CCM is within 1.3% of the identity matrix — the color correction has already been applied. The tone curve departs from `[0, 1, 0, 0]` because it absorbs the sRGB transfer function applied during the uint8 quantization step.
+
 ## Usage
 
 ### Python

@@ -146,6 +146,8 @@ struct WhiteBalanceCost {
 
 Solver::Solver() = default;
 Solver::~Solver() = default;
+Solver::Solver(Solver&&) noexcept = default;
+Solver& Solver::operator=(Solver&&) noexcept = default;
 
 void Solver::solve(const std::vector<PatchStatistics>& patches) {
     if (patches.empty())
