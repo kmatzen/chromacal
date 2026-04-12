@@ -1,0 +1,86 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "chromacal"
+version = "0.1.0"
+description = "ColorChecker camera calibration: detect, solve, apply. Log-polynomial tone curve + CCM via Ceres, OCIO 3D LUT export."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    { name = "Kevin Blackburn-Matzen" },
+]
+keywords = [
+    "color-calibration",
+    "colorchecker",
+    "camera-calibration",
+    "color-correction",
+    "color-science",
+    "opencv",
+    "opencolorio",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "numpy",
+]
+
+[project.urls]
+Homepage = "https://github.com/kmatzen/chromacal"
+Repository = "https://github.com/kmatzen/chromacal"
+Issues = "https://github.com/kmatzen/chromacal/issues"
+
+[tool.scikit-build]
+cmake.args = ["-DCHROMACAL_BUILD_PYTHON=ON"]
+wheel.packages = ["src/chromacal"]
+
+[tool.scikit-build.cmake.define]
+CHROMACAL_BUILD_PYTHON = "ON"
+CHROMACAL_BUILD_TESTS = "OFF"
+CHROMACAL_BUILD_EXAMPLES = "OFF"
+
+[tool.cibuildwheel]
+build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
+skip = "*-win32 *-musllinux_i686 *_ppc64le *_s390x"
+test-command = "python -c \"import chromacal; print(f'chromacal {chromacal.__version__} OK')\""
+
+[tool.cibuildwheel.linux]
+before-all = [
+    "yum install -y epel-release || true",
+    "yum install -y cmake3 eigen3-devel opencv-devel || true",
+    # Build Ceres from source (not in most distro repos)
+    "pip install cmake",
+    "git clone --depth 1 --branch 2.2.0 https://github.com/ceres-solver/ceres-solver.git /tmp/ceres",
+    "cmake -S /tmp/ceres -B /tmp/ceres/build -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DMINIGLOG=ON -DCMAKE_BUILD_TYPE=Release",
+    "cmake --build /tmp/ceres/build -j$(nproc) && cmake --install /tmp/ceres/build",
+    # Build OpenColorIO from source
+    "git clone --depth 1 --branch v2.3.2 https://github.com/AcademySoftwareFoundation/OpenColorIO.git /tmp/ocio",
+    "cmake -S /tmp/ocio -B /tmp/ocio/build -DOCIO_BUILD_APPS=OFF -DOCIO_BUILD_TESTS=OFF -DOCIO_BUILD_GPU_TESTS=OFF -DOCIO_BUILD_PYTHON=OFF -DCMAKE_BUILD_TYPE=Release",
+    "cmake --build /tmp/ocio/build -j$(nproc) && cmake --install /tmp/ocio/build",
+]
+environment = { CMAKE_PREFIX_PATH = "/usr/local" }
+
+[tool.cibuildwheel.macos]
+before-all = [
+    "brew install eigen ceres-solver opencolorio opencv",
+]
+
+[tool.cibuildwheel.macos.environment]
+CMAKE_PREFIX_PATH = "/opt/homebrew;/usr/local"

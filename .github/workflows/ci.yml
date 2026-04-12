@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libeigen3-dev libopencv-dev libgoogle-glog-dev libgflags-dev libsuitesparse-dev
+
+          # Ceres Solver
+          git clone --depth 1 --branch 2.2.0 https://github.com/ceres-solver/ceres-solver.git /tmp/ceres
+          cmake -S /tmp/ceres -B /tmp/ceres/build -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/ceres/build -j$(nproc)
+          sudo cmake --install /tmp/ceres/build
+
+          # OpenColorIO
+          git clone --depth 1 --branch v2.3.2 https://github.com/AcademySoftwareFoundation/OpenColorIO.git /tmp/ocio
+          cmake -S /tmp/ocio -B /tmp/ocio/build -DOCIO_BUILD_APPS=OFF -DOCIO_BUILD_TESTS=OFF -DOCIO_BUILD_GPU_TESTS=OFF -DOCIO_BUILD_PYTHON=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/ocio/build -j$(nproc)
+          sudo cmake --install /tmp/ocio/build
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install eigen ceres-solver opencolorio opencv
+
+      - name: Configure
+        run: cmake -B build -DCHROMACAL_BUILD_TESTS=ON -DCHROMACAL_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Test
+        run: cd build && ctest --output-on-failure
