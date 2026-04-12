@@ -24,13 +24,13 @@ Before and after calibration on a GoPro Hero10 frame (ColorChecker visible in sc
 
 **Detected patches:** 24 of 24
 
-**Fitted tone curve coefficients:** `[1.4282, 3.4494, 0.7286, 0.0704]`
+**Fitted tone curve coefficients:** `[1.377, 3.479, 0.739, 0.072]`
 
 **Fitted color correction matrix:**
 ```
-[[ 1.496  -0.524  -0.294]
- [-0.300   1.761  -0.273]
- [ 0.040  -0.531   3.000]]
+[[ 1.586  -0.638  -0.214]
+ [-0.303   1.826  -0.294]
+ [-0.014  -0.449   3.000]]
 ```
 
 The off-diagonal entries show the GoPro sensor has significant blue-channel crosstalk that the CCM corrects. The tone curve coefficients (far from the identity `[0, 1, 0, 0]`) indicate the camera's built-in processing applies a heavy tonal response.
@@ -49,14 +49,14 @@ Detecting the ColorChecker in the *corrected* image and solving again should pro
 
 **Re-detection CCM:**
 ```
-[[ 0.984   0.055  -0.010]
- [ 0.000   1.004   0.006]
- [-0.026   0.044   0.997]]
+[[ 1.006  -0.011   0.013]
+ [-0.003   0.999   0.010]
+ [ 0.005  -0.001   0.999]]
 ```
 
-**Re-detection tone curve:** `[-0.0268, 2.0255, -0.3482, -0.1722]`
+**Re-detection tone curve:** `[0.013, 2.316, 0.116, 0.018]`
 
-The CCM diagonals are within 2% of 1.0 and off-diagonals are under 0.06 — effectively an identity matrix. The tone curve departs from `[0, 1, 0, 0]` because the corrected image is stored as sRGB (with the standard IEC 61966-2-1 transfer function), so the re-detected curve absorbs that encoding.
+The CCM is within 1.3% of the identity matrix. The tone curve departs from `[0, 1, 0, 0]` because the corrected image is stored as sRGB (with the standard IEC 61966-2-1 transfer function), so the re-detected curve absorbs that encoding.
 
 ## Usage
 
