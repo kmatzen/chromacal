@@ -69,9 +69,9 @@ A patch passes if **any** test category passes (lenient for real-world noisy dat
 
 The Bradford chromatic adaptation matrix bridges the gap between D50 (5000K calibration lighting where ColorChecker references are measured) and D65 (sRGB standard display white point).
 
-## Example fit (GoPro Hero13)
+## Example fit (GoPro Hero10)
 
-Running chromacal on a GoPro Hero13 video frame with a ColorChecker in scene:
+Running chromacal on a GoPro Hero10 video frame with a ColorChecker in scene:
 
 **Tone curve:** `p0=1.4282, p1=3.4494, p2=0.7286, p3=0.0704`
 

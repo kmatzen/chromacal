@@ -16,7 +16,7 @@ chromacal fits a **log-polynomial tone curve + 3x3 color correction matrix** to 
 
 ## Example
 
-Before and after calibration on a GoPro Hero13 frame (ColorChecker visible in scene):
+Before and after calibration on a GoPro Hero10 frame (ColorChecker visible in scene):
 
 | Before | After |
 |--------|-------|
