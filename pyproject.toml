@@ -69,7 +69,7 @@ before-all = [
     # Build OpenCV with contrib (mcc module) from source — distro only has 3.4
     "git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv.git /tmp/opencv",
     "git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv_contrib.git /tmp/opencv_contrib",
-    "cmake -S /tmp/opencv -B /tmp/opencv/build -DOPENCV_EXTRA_MODULES_PATH=/tmp/opencv_contrib/modules -DBUILD_LIST=core,imgproc,calib3d,mcc -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_opencv_python3=OFF -DWITH_FFMPEG=OFF -DWITH_GTK=OFF -DWITH_V4L=OFF -DCMAKE_BUILD_TYPE=Release",
+    "cmake -S /tmp/opencv -B /tmp/opencv/build -DOPENCV_EXTRA_MODULES_PATH=/tmp/opencv_contrib/modules -DBUILD_LIST=core,imgproc,calib3d,mcc -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_opencv_apps=OFF -DBUILD_opencv_python3=OFF -DWITH_FFMPEG=OFF -DWITH_GTK=OFF -DWITH_V4L=OFF -DCMAKE_BUILD_TYPE=Release",
     "cmake --build /tmp/opencv/build -j$(nproc) && cmake --install /tmp/opencv/build",
     # Build Ceres from source
     "git clone --depth 1 --branch 2.2.0 https://github.com/ceres-solver/ceres-solver.git /tmp/ceres",
