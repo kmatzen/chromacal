@@ -47,6 +47,23 @@ The "after" row closely matches the reference — saturated colors are recovered
 
 Detecting the ColorChecker in the *corrected* image and solving again should produce a near-identity transform, confirming the calibration was applied correctly:
 
+```python
+# Apply calibration
+corrected = solver.infer(rgb_image)  # linear RGB float64
+
+# Encode as sRGB for storage
+corrected_srgb = linear_to_srgb(corrected)
+corrected_8bit = (corrected_srgb * 255).astype(np.uint8)
+
+# Re-detect and re-solve on the corrected image
+patches2 = chromacal.detect(cv2.cvtColor(corrected_8bit, cv2.COLOR_RGB2BGR))
+solver2 = chromacal.Solver()
+solver2.solve(patches2)
+
+print(solver2.get_ccm())   # should be near identity
+print(solver2.get_luma_params())  # should be near [0, 1, 0, 0]
+```
+
 **Re-detection CCM:**
 ```
 [[ 1.006  -0.011   0.013]
