@@ -14,6 +14,27 @@ chromacal fits a **log-polynomial tone curve + 3x3 color correction matrix** to 
 - **Perceptually weights** — darker and more saturated colors get higher weight (where cameras struggle most)
 - **Generates OCIO 3D LUTs** — apply calibration via OpenColorIO for GPU-accelerated or batch processing
 
+## Example
+
+Before and after calibration on a GoPro Hero13 frame (ColorChecker visible in scene):
+
+| Before | After |
+|--------|-------|
+| ![Before calibration](docs/before.jpg) | ![After calibration](docs/after.jpg) |
+
+**Detected patches:** 24 of 24
+
+**Fitted tone curve coefficients:** `[1.4282, 3.4494, 0.7286, 0.0704]`
+
+**Fitted color correction matrix:**
+```
+[[ 1.496  -0.524  -0.294]
+ [-0.300   1.761  -0.273]
+ [ 0.040  -0.531   3.000]]
+```
+
+The off-diagonal entries show the GoPro sensor has significant blue-channel crosstalk that the CCM corrects. The tone curve coefficients (far from the identity `[0, 1, 0, 0]`) indicate the camera's built-in processing applies a heavy tonal response.
+
 ## Usage
 
 ### Python

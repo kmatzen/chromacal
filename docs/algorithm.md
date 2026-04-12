@@ -69,6 +69,25 @@ A patch passes if **any** test category passes (lenient for real-world noisy dat
 
 The Bradford chromatic adaptation matrix bridges the gap between D50 (5000K calibration lighting where ColorChecker references are measured) and D65 (sRGB standard display white point).
 
+## Example fit (GoPro Hero13)
+
+Running chromacal on a GoPro Hero13 video frame with a ColorChecker in scene:
+
+**Tone curve:** `p0=1.4282, p1=3.4494, p2=0.7286, p3=0.0704`
+
+These are far from the identity (`0, 1, 0, 0`), reflecting the GoPro's aggressive built-in color processing. The large `p1` (slope in log-space) indicates a steep gamma-like curve.
+
+**Color correction matrix:**
+```
+[[ 1.496  -0.524  -0.294]
+ [-0.300   1.761  -0.273]
+ [ 0.040  -0.531   3.000]]
+```
+
+The blue channel diagonal hitting the upper bound (3.0) and the large off-diagonal entries show the GoPro sensor's color filter array produces significant cross-channel crosstalk, especially in blue. The negative off-diagonal values compensate for this by subtracting the leaked signal from neighboring channels.
+
+**Optimization:** Converged in 89 iterations, reducing cost from 4.84e+04 to 3.86e+03 (92% reduction). The residual cost reflects the Huber-robust, Mahalanobis-weighted error across all 24 patches.
+
 ## Solver configuration
 
 - **Algorithm**: Ceres Solver, Dense QR linear solver
