@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ------------------------------------------------------------------------------
 option(CHROMACAL_BUILD_PYTHON "Build Python bindings" OFF)
 option(CHROMACAL_BUILD_EXAMPLES "Build examples" OFF)
+option(CHROMACAL_BUILD_TESTS "Build tests" OFF)
 
 # ------------------------------------------------------------------------------
 # Dependencies
@@ -64,6 +65,50 @@ if(CHROMACAL_BUILD_PYTHON)
     pybind11_add_module(_chromacal python/bindings.cpp)
     target_link_libraries(_chromacal PRIVATE chromacal)
     install(TARGETS _chromacal DESTINATION .)
+endif()
+
+# ------------------------------------------------------------------------------
+# Examples
+# ------------------------------------------------------------------------------
+if(CHROMACAL_BUILD_EXAMPLES)
+    add_executable(calibrate examples/calibrate.cpp)
+    target_link_libraries(calibrate PRIVATE chromacal)
+
+    add_executable(apply_calibration examples/apply_calibration.cpp)
+    target_link_libraries(apply_calibration PRIVATE chromacal)
+
+    add_executable(inspect_patches examples/inspect_patches.cpp)
+    target_link_libraries(inspect_patches PRIVATE chromacal)
+endif()
+
+# ------------------------------------------------------------------------------
+# Tests
+# ------------------------------------------------------------------------------
+if(CHROMACAL_BUILD_TESTS)
+    enable_testing()
+
+    include(FetchContent)
+    FetchContent_Declare(
+        Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG v3.8.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(Catch2)
+    list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+
+    add_executable(chromacal_tests
+        tests/test_types.cpp
+        tests/test_detect.cpp
+        tests/test_solver.cpp
+        tests/test_apply.cpp
+    )
+
+    target_link_libraries(chromacal_tests PRIVATE chromacal Catch2::Catch2WithMain)
+
+    include(CTest)
+    include(Catch)
+    catch_discover_tests(chromacal_tests)
 endif()
 
 # ------------------------------------------------------------------------------
