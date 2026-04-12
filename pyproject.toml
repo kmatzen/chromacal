@@ -73,7 +73,7 @@ before-all = [
     "cmake --build /tmp/opencv/build -j$(nproc) && cmake --install /tmp/opencv/build",
     # Build Ceres from source
     "git clone --depth 1 --branch 2.2.0 https://github.com/ceres-solver/ceres-solver.git /tmp/ceres",
-    "cmake -S /tmp/ceres -B /tmp/ceres/build -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DMINIGLOG=ON -DCMAKE_BUILD_TYPE=Release",
+    "cmake -S /tmp/ceres -B /tmp/ceres/build -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DMINIGLOG=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_BUILD_TYPE=Release",
     "cmake --build /tmp/ceres/build -j$(nproc) && cmake --install /tmp/ceres/build",
     # Build OpenColorIO from source
     "git clone --depth 1 --branch v2.5.1 https://github.com/AcademySoftwareFoundation/OpenColorIO.git /tmp/ocio",
