@@ -21,6 +21,8 @@ class Solver {
   public:
     Solver();
     ~Solver();
+    Solver(Solver&&) noexcept;
+    Solver& operator=(Solver&&) noexcept;
 
     /// Fit the model to detected ColorChecker patches.
     ///
