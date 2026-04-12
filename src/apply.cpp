@@ -52,8 +52,9 @@ cv::Mat apply_lut(const cv::Mat& image, OCIO::ConstCPUProcessorRcPtr processor) 
     cv::Mat temp;
 
     if (image.type() == CV_8UC3) {
-        in_depth = OCIO::BIT_DEPTH_UINT8;
-        in_data = const_cast<uchar*>(image.ptr<uchar>());
+        image.convertTo(temp, CV_32F, 1.0 / 255.0);
+        in_depth = OCIO::BIT_DEPTH_F32;
+        in_data = temp.ptr<float>();
     } else if (image.type() == CV_32FC3) {
         in_depth = OCIO::BIT_DEPTH_F32;
         in_data = const_cast<float*>(image.ptr<float>());
