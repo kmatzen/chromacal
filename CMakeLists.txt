@@ -31,6 +31,7 @@ add_library(chromacal
     src/apply.cpp
 )
 
+set_target_properties(chromacal PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(chromacal::chromacal ALIAS chromacal)
 
 target_include_directories(chromacal
