@@ -164,17 +164,26 @@ void Solver::solve(const std::vector<PatchStatistics>& patches) {
 
     size_t idx = 0;
     for (const auto& p : patches) {
+        // Down-weight unreliable patches (contaminated by specular highlights,
+        // occlusions, etc.) by scaling the loss by reliability^2 -- equivalent
+        // to scaling the residual by the reliability. reliability == 1 leaves
+        // the plain Huber loss untouched, so clean patches are unaffected.
+        double rw2 = p.reliability * p.reliability;
+        ceres::LossFunction* loss = new ceres::HuberLoss(3.0);
+        if (p.reliability < 1.0)
+            loss = new ceres::ScaledLoss(loss, rw2, ceres::TAKE_OWNERSHIP);
+
         problem.AddResidualBlock(
             new ceres::AutoDiffCostFunction<ColorCalibrationCost, 3, 4, 9>(
                 new ColorCalibrationCost(p.mean, p.covariance, p.reference_lab, p.exposure, ref_exp)),
-            new ceres::HuberLoss(3.0), luma.data(), ccm);
+            loss, luma.data(), ccm);
 
         int patch_id = idx % 24;
         if (patch_id >= 18 && patch_id <= 23) {
             problem.AddResidualBlock(
                 new ceres::AutoDiffCostFunction<WhiteBalanceCost, 2, 4, 9>(
                     new WhiteBalanceCost(p.mean, p.exposure, ref_exp)),
-                new ceres::ScaledLoss(nullptr, 0.1, ceres::TAKE_OWNERSHIP), luma.data(), ccm);
+                new ceres::ScaledLoss(nullptr, 0.1 * rw2, ceres::TAKE_OWNERSHIP), luma.data(), ccm);
         }
         ++idx;
     }

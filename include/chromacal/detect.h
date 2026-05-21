@@ -29,6 +29,18 @@ std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure = 1.0,
 /// Henze-Zirkler tests. Passes overall if any test category passes.
 NormalityTestResults test_normality(const std::vector<cv::Vec3d>& pixels, double alpha = 0.01);
 
+/// Robust reliability weight for a patch, in (0, 1].
+///
+/// Computes the fraction of pixels whose squared Mahalanobis distance exceeds
+/// the chi-square(3) 99th percentile (~1% expected for clean Gaussian data),
+/// then maps the excess to a weight: 1.0 for a clean patch, decreasing
+/// smoothly toward a small floor as gross outliers (specular highlights,
+/// occlusions, shadow edges) accumulate. Unlike a normality hypothesis test,
+/// this is stable with respect to sample size, so it does not reject good
+/// patches simply because they contain many pixels.
+double patch_reliability(const std::vector<cv::Vec3d>& pixels, const cv::Vec3d& mean,
+                         const cv::Matx33d& covariance);
+
 /// Filter patches to only those passing normality tests.
 std::vector<PatchStatistics> filter_normal(const std::vector<PatchStatistics>& patches);
 

@@ -30,6 +30,7 @@ from _chromacal import (
     create_lut,
     detect,
     filter_normal,
+    write_cube,
 )
 
 __all__ = [
@@ -39,6 +40,7 @@ __all__ = [
     "Solver",
     "create_lut",
     "apply_lut",
+    "write_cube",
     "LUT",
     "NormalityTestResults",
     "PatchStatistics",

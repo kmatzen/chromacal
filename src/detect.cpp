@@ -73,21 +73,33 @@ double shapiro_wilk_test(const std::vector<double>& data) {
         m[i] = (p < 0.5) ? -q : q;
     }
 
-    double m_ssq = 0.0;
-    for (double val : m) m_ssq += val * val;
+    // Shapiro-Francia W': the squared Pearson correlation between the ordered
+    // sample x and the expected normal order statistics m. The previous
+    // formula, (sum (m_i/||m||) x_i)^2 / ssq, is only valid for mean-zero
+    // data; patch RGB values sit near 0.2-0.8, so the uncentred sum was
+    // swamped by the mean and W' collapsed (~0.7 instead of ~0.99 for
+    // Gaussian data), making the test reject everything.
+    double m_mean = 0.0;
+    for (double val : m) m_mean += val;
+    m_mean /= n;
 
-    std::vector<double> a(n);
-    double sum_m2 = std::sqrt(m_ssq);
-    for (int i = 0; i < n; ++i) a[i] = m[i] / sum_m2;
+    double s_xm = 0.0, s_mm = 0.0;
+    for (int i = 0; i < n; ++i) {
+        s_xm += (x[i] - mean) * (m[i] - m_mean);
+        s_mm += (m[i] - m_mean) * (m[i] - m_mean);
+    }
+    double W = (s_xm * s_xm) / (ssq * s_mm);
 
-    double b = 0.0;
-    for (int i = 0; i < n; ++i) b += a[i] * x[i];
-
-    double W = (b * b) / ssq;
-    double log_W = std::log(1.0 - W);
-    double mu = -1.2725 + 1.0521 * std::log(static_cast<double>(n));
-    double sigma = 1.0308 - 0.26758 * std::log(static_cast<double>(n));
-    double z = (log_W - mu) / sigma;
+    // Royston (1993) normalizing transform for the Shapiro-Francia W',
+    // expressed in terms of nu = ln(n): mu uses (ln(nu) - nu) and sigma uses
+    // (ln(nu) + 2/nu). The previous code passed nu directly, which drove
+    // sigma negative for n > ~47 and inverted the test.
+    double nu = std::log(static_cast<double>(n));
+    double u1 = std::log(nu) - nu;
+    double u2 = std::log(nu) + 2.0 / nu;
+    double mu = -1.2725 + 1.0521 * u1;
+    double sigma = 1.0308 - 0.26758 * u2;
+    double z = (std::log(1.0 - W) - mu) / sigma;
 
     return normal_sf(z);
 }
@@ -151,15 +163,23 @@ double henze_zirkler_test(const std::vector<cv::Vec3d>& pixels, const cv::Vec3d&
     int n = static_cast<int>(pixels.size());
     if (n < 4) return 0.0;
 
-    double p = 3.0;
-    double beta = 1.0 / std::sqrt(2.0) *
-                  std::pow((2.0 * p + 1.0) / 4.0 * std::pow(n, 1.0 / (p + 4.0)),
-                           1.0 / (p + 4.0));
+    const double p = 3.0;
 
+    // The HZ statistic is defined in terms of the MLE (1/n) covariance;
+    // test_normality passes the (1/(n-1)) sample covariance, so rescale.
+    cv::Matx33d cov_mle = covariance * (static_cast<double>(n - 1) / n);
     cv::Matx33d cov_inv;
-    cv::invert(covariance, cov_inv);
+    cv::invert(cov_mle, cov_inv, cv::DECOMP_SVD);
 
-    // Compute Mahalanobis distances
+    // Smoothing parameter (Henze & Zirkler 1990):
+    //   beta = (1/sqrt(2)) * ( n*(2p+1)/4 )^(1/(p+4))
+    // The previous code raised n^(1/(p+4)) and then the whole bracket to
+    // 1/(p+4) again, producing the wrong bandwidth.
+    double beta = (1.0 / std::sqrt(2.0)) *
+                  std::pow(n * (2.0 * p + 1.0) / 4.0, 1.0 / (p + 4.0));
+    double b2 = beta * beta;
+
+    // Mahalanobis distances to the sample mean.
     std::vector<double> D(n);
     for (int i = 0; i < n; ++i) {
         cv::Vec3d di = pixels[i] - mean;
@@ -170,7 +190,7 @@ double henze_zirkler_test(const std::vector<cv::Vec3d>& pixels, const cv::Vec3d&
         D[i] = d;
     }
 
-    // Term 1: double sum
+    // Term 1: pairwise Mahalanobis distances.
     double S1 = 0.0;
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
@@ -179,38 +199,40 @@ double henze_zirkler_test(const std::vector<cv::Vec3d>& pixels, const cv::Vec3d&
             for (int a = 0; a < 3; ++a)
                 for (int b = 0; b < 3; ++b)
                     d2 += dij[a] * cov_inv(a, b) * dij[b];
-            S1 += std::exp(-beta * beta * d2 / 2.0);
+            S1 += std::exp(-b2 / 2.0 * d2);
         }
     }
     S1 /= (static_cast<double>(n) * n);
 
-    // Term 2
+    // Term 2: note the exponent uses b2/(2(1+b2)), not b2/2.
     double S2 = 0.0;
-    for (int i = 0; i < n; ++i) {
-        S2 += std::exp(-beta * beta * D[i] / 2.0);
-    }
-    S2 *= 2.0 / n;
+    for (int i = 0; i < n; ++i)
+        S2 += std::exp(-b2 / (2.0 * (1.0 + b2)) * D[i]);
+    S2 = 2.0 * std::pow(1.0 + b2, -p / 2.0) * S2 / n;
 
-    double b2 = beta * beta;
     double term3 = std::pow(1.0 + 2.0 * b2, -p / 2.0);
-    double HZ = S1 - S2 * std::pow(1.0 + b2, -p / 2.0) + term3;
+    double HZ = static_cast<double>(n) * (S1 - S2 + term3);
 
-    // Approximate log-normal parameters
-    double omega2 = 1.0 + 2.0 * b2;
-    double E_HZ = std::pow(1.0 + 2.0 * b2, -p / 2.0) *
-                      (1.0 + p * b2 / (1.0 + 2.0 * b2) +
-                       p * (p + 2.0) * b2 * b2 / (2.0 * omega2 * omega2)) -
-                  2.0 * std::pow(1.0 + b2, -p / 2.0) *
-                      (1.0 + p * b2 / (2.0 * (1.0 + b2)) +
-                       p * (p + 2.0) * b2 * b2 / (8.0 * (1.0 + b2) * (1.0 + b2))) +
-                  std::pow(1.0 + 2.0 * b2, -p / 2.0);
+    // Mean and variance of HZ under multivariate normality, then a
+    // log-normal moment match for the p-value (Henze & Zirkler 1990).
+    double wb = (1.0 + b2) * (1.0 + 3.0 * b2);
+    double mu = 1.0 - std::pow(1.0 + 2.0 * b2, -p / 2.0) *
+                          (1.0 + p * b2 / (1.0 + 2.0 * b2) +
+                           p * (p + 2.0) * b2 * b2 / (2.0 * std::pow(1.0 + 2.0 * b2, 2.0)));
+    double si2 =
+        2.0 * std::pow(1.0 + 4.0 * b2, -p / 2.0) +
+        2.0 * std::pow(1.0 + 2.0 * b2, -p) *
+            (1.0 + 2.0 * p * b2 * b2 / std::pow(1.0 + 2.0 * b2, 2.0) +
+             3.0 * p * (p + 2.0) * std::pow(b2, 4.0) / (4.0 * std::pow(1.0 + 2.0 * b2, 4.0))) -
+        4.0 * std::pow(wb, -p / 2.0) *
+            (1.0 + 3.0 * p * b2 * b2 / (2.0 * wb) +
+             p * (p + 2.0) * std::pow(b2, 4.0) / (2.0 * wb * wb));
 
-    double ln_HZ = std::log(std::max(HZ, 1e-12));
-    double ln_E = std::log(std::max(E_HZ, 1e-12));
-    double sigma2_ln = std::log(1.0 + 1.0 / n);
-    double z = (ln_HZ - ln_E) / std::sqrt(sigma2_ln);
+    double pmu = std::log(std::sqrt(mu * mu * mu * mu / (si2 + mu * mu)));
+    double psig = std::sqrt(std::log((si2 + mu * mu) / (mu * mu)));
+    double z = (std::log(HZ) - pmu) / psig;
 
-    return normal_sf(z);
+    return normal_sf(z); // upper tail: large HZ => departure from normality
 }
 
 NormalityTestResults test_normality(const std::vector<cv::Vec3d>& pixels, double alpha) {
@@ -262,6 +284,37 @@ NormalityTestResults test_normality(const std::vector<cv::Vec3d>& pixels, double
 
     results.overall_passes = (passed_tests >= 1);
     return results;
+}
+
+double patch_reliability(const std::vector<cv::Vec3d>& pixels, const cv::Vec3d& mean,
+                         const cv::Matx33d& covariance) {
+    int n = static_cast<int>(pixels.size());
+    if (n < 4) return 1.0;
+
+    cv::Matx33d cov_inv;
+    cv::invert(covariance, cov_inv, cv::DECOMP_SVD);
+
+    // chi-square(3) upper-1% critical value: ~1% of clean Gaussian pixels lie
+    // beyond it. Specular highlights / occlusions produce far more.
+    const double kThreshold = 11.345;
+    int outliers = 0;
+    for (const auto& px : pixels) {
+        cv::Vec3d d = px - mean;
+        double m2 = 0.0;
+        for (int a = 0; a < 3; ++a)
+            for (int b = 0; b < 3; ++b)
+                m2 += d[a] * cov_inv(a, b) * d[b];
+        if (m2 > kThreshold) ++outliers;
+    }
+    double frac = static_cast<double>(outliers) / n;
+
+    // Linear ramp from 1.0 (at the expected ~1% rate) to a small floor once a
+    // sizable fraction of pixels are gross outliers.
+    const double kExpected = 0.01;
+    const double kFullyUnreliable = 0.15;
+    const double kFloor = 0.05;
+    double t = std::clamp((frac - kExpected) / (kFullyUnreliable - kExpected), 0.0, 1.0);
+    return 1.0 - (1.0 - kFloor) * t;
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +437,7 @@ std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure,
         stats.pixel_count = static_cast<int>(pixels.size());
         stats.raw_pixels = pixels;
         stats.normality_tests = test_normality(pixels);
+        stats.reliability = patch_reliability(pixels, mean, cov);
 
         result.push_back(stats);
     }

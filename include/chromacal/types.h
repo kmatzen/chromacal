@@ -27,6 +27,16 @@ struct PatchStatistics {
     int pixel_count = 0;               ///< Number of valid pixels.
     std::vector<cv::Vec3d> raw_pixels; ///< Raw pixel values for normality testing.
     NormalityTestResults normality_tests;
+
+    /// Robust reliability weight in (0, 1], based on the fraction of pixels
+    /// that are multivariate outliers (Mahalanobis distance beyond the
+    /// chi-square expectation). 1.0 for a clean, flat patch; lower for patches
+    /// contaminated by specular highlights, occlusions, or shadow edges. The
+    /// solver uses it to down-weight unreliable patches without discarding
+    /// them — a graceful alternative to the binary normality gate, and one
+    /// that does not suffer the large-sample hypersensitivity of the
+    /// normality tests.
+    double reliability = 1.0;
 };
 
 /// Calibration result from the solver.

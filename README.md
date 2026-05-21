@@ -10,7 +10,7 @@ chromacal fits a **log-polynomial tone curve + 3x3 color correction matrix** to 
 
 - **Jointly fits tone curve and CCM** — no need to manually linearize first
 - **Weights by measurement uncertainty** — per-patch covariance (Mahalanobis distance) so noisy patches matter less
-- **Filters bad patches** — multivariate normality tests (Shapiro-Wilk, Mardia, Henze-Zirkler) reject patches with specular reflections or shading gradients
+- **Down-weights bad patches** — a robust per-patch reliability score (outlier fraction vs. the chi-square expectation) lets the solver gracefully discount patches with specular reflections or occlusions, without discarding them; an optional normality filter is also available for pristine captures
 - **Perceptually weights** — darker and more saturated colors get higher weight (where cameras struggle most)
 - **Generates OCIO 3D LUTs** — apply calibration via OpenColorIO for GPU-accelerated or batch processing
 
@@ -89,9 +89,10 @@ image = cv2.imread("colorchecker.jpg")
 
 # 1. Detect — find the chart and extract patch statistics
 patches = chromacal.detect(image)
-patches = chromacal.filter_normal(patches)  # reject bad patches
+# (optional) cull patches up front on pristine captures:
+#   patches = chromacal.filter_normal(patches)
 
-# 2. Solve — fit the color profile
+# 2. Solve — fit the color profile (down-weights unreliable patches internally)
 solver = chromacal.Solver()
 solver.solve(patches)
 solver.save("calibration.yml")
@@ -110,9 +111,9 @@ cv::Mat image = cv::imread("colorchecker.jpg");
 
 // Detect
 auto patches = chromacal::detect(image);
-patches = chromacal::filter_normal(patches);
+// (optional) patches = chromacal::filter_normal(patches);
 
-// Solve
+// Solve — down-weights unreliable patches internally
 chromacal::Solver solver;
 solver.solve(patches);
 solver.save("calibration.yml");
@@ -140,9 +141,9 @@ target_link_libraries(your_target PRIVATE chromacal::chromacal)
 
 1. **Detection**: OpenCV's MCC24 detector locates the ColorChecker. Per-patch pixel statistics (mean, covariance) are computed after rejecting saturated pixels.
 
-2. **Normality filtering**: Patches are tested for multivariate normality using Shapiro-Wilk (per channel), Mardia (skewness + kurtosis), and Henze-Zirkler tests. Only patches with Gaussian-distributed pixels are used — this rejects specular highlights, shadows, and motion blur.
+2. **Reliability scoring**: Each patch gets a robust reliability weight from the fraction of its pixels that are multivariate outliers (Mahalanobis distance beyond the chi-square expectation). This flags genuine contamination (specular highlights, occlusions) while tolerating mild gradients and 8-bit quantization, and — unlike a normality hypothesis test — it is stable with respect to the number of pixels in a patch. (An optional `filter_normal` step using Shapiro-Francia / Mardia / Henze-Zirkler tests is available for pristine, high-bit-depth captures.)
 
-3. **Optimization**: Ceres Solver minimizes the perceptually-weighted Mahalanobis distance between predicted and reference colors (CIE Lab D50). The model has 13 parameters: 4 log-polynomial tone curve coefficients + 9 CCM entries. Huber loss reduces outlier influence. Neutral patches (18-23) get an auxiliary white balance constraint.
+3. **Optimization**: Ceres Solver minimizes the perceptually-weighted Mahalanobis distance between predicted and reference colors (CIE Lab D50). The model has 13 parameters: 4 log-polynomial tone curve coefficients + 9 CCM entries. Huber loss reduces outlier influence, and each patch's residual is additionally scaled by its reliability weight. Neutral patches (18-23) get an auxiliary white balance constraint.
 
 4. **Application**: The solver is baked into a 129^3 OCIO 3D LUT for fast per-pixel application. Input: gamma-encoded RGB. Output: linear RGB at reference exposure.
 
@@ -171,11 +172,21 @@ cmake --build build
 
 ### `detect(image, exposure=1.0)`
 
-Detect a ColorChecker in a BGR image and return patch statistics.
+Detect a ColorChecker in a BGR image and return patch statistics. Each returned
+patch carries a `reliability` weight in (0, 1]; `Solver.solve` uses it to
+down-weight contaminated patches automatically, so no explicit filtering step
+is required.
 
-### `filter_normal(patches)`
+### `filter_normal(patches)` *(optional)*
 
-Remove patches that fail multivariate normality tests.
+Remove patches that fail multivariate normality tests (Shapiro-Francia,
+Mardia, Henze-Zirkler). This is an opt-in, aggressive cull intended for
+pristine, high-bit-depth captures with flat, evenly-lit patches. Because
+goodness-of-fit tests grow more sensitive with sample size, patches with many
+pixels — or any 8-bit/compressed/downscaled image (such as the web-sized
+`docs/before.png` example) — are frequently rejected as non-Gaussian even when
+their mean color is perfectly usable. Prefer the built-in `reliability`
+weighting (above) for most workflows.
 
 ### `Solver`
 
@@ -194,6 +205,13 @@ Bake the calibration into an OCIO 3D LUT for fast application.
 ### `apply_lut(image, lut)`
 
 Apply the 3D LUT to an image. Returns float32 RGB.
+
+### `write_cube(solver, path, lut_size=33, title="chromacal")`
+
+Write the calibration as an Iridas/Resolve `.cube` 3D LUT file, independent of
+OpenColorIO. Drop the result into a DaVinci Resolve or Premiere/Lumetri LUT slot.
+Input domain is gamma-encoded RGB in `[0, 1]`; output is linear RGB at the
+reference exposure (written unclamped, so values may exceed `[0, 1]`).
 
 ## License
 
