@@ -35,11 +35,12 @@ int main(int argc, char** argv) {
               << std::setw(10) << "G"
               << std::setw(10) << "B"
               << std::setw(8) << "Pixels"
+              << std::setw(12) << "Reliab."
               << std::setw(10) << "Normal?"
               << std::setw(12) << "SW p-val"
               << std::setw(12) << "HZ p-val"
               << std::endl;
-    std::cout << std::string(77, '-') << std::endl;
+    std::cout << std::string(89, '-') << std::endl;
 
     int normal_count = 0;
     for (size_t i = 0; i < patches.size(); ++i) {
@@ -51,6 +52,7 @@ int main(int argc, char** argv) {
                   << std::setw(10) << p.mean[1]
                   << std::setw(10) << p.mean[2]
                   << std::setw(8) << p.pixel_count
+                  << std::setw(12) << p.reliability
                   << std::setw(10) << (nt.overall_passes ? "PASS" : "FAIL");
 
         if (!nt.shapiro_pvalues.empty()) {
