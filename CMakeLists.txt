@@ -106,6 +106,8 @@ if(CHROMACAL_BUILD_TESTS)
     )
 
     target_link_libraries(chromacal_tests PRIVATE chromacal Catch2::Catch2WithMain)
+    target_compile_definitions(chromacal_tests PRIVATE
+        CHROMACAL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
     include(CTest)
     include(Catch)

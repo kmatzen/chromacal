@@ -58,6 +58,7 @@ PYBIND11_MODULE(_chromacal, m) {
     py::class_<chromacal::PatchStatistics>(m, "PatchStatistics")
         .def_readonly("pixel_count", &chromacal::PatchStatistics::pixel_count)
         .def_readonly("exposure", &chromacal::PatchStatistics::exposure)
+        .def_readonly("reliability", &chromacal::PatchStatistics::reliability)
         .def_readonly("normality_tests", &chromacal::PatchStatistics::normality_tests)
         .def_property_readonly("mean", [](const chromacal::PatchStatistics& p) {
             return std::vector<double>{p.mean[0], p.mean[1], p.mean[2]};
@@ -118,6 +119,11 @@ PYBIND11_MODULE(_chromacal, m) {
         return chromacal::create_lut(solver, size);
     }, py::arg("solver"), py::arg("lut_size") = 129,
        "Build an OpenColorIO 3D LUT from a calibration.");
+
+    m.def("write_cube", &chromacal::write_cube,
+          py::arg("solver"), py::arg("path"), py::arg("lut_size") = 33,
+          py::arg("title") = "chromacal",
+          "Write the calibration as a Resolve/Iridas .cube 3D LUT file.");
 
     m.def("apply_lut", [](py::array_t<uint8_t> image, const OCIO::ConstCPUProcessorRcPtr& proc) {
         cv::Mat mat = numpy_to_mat_bgr(image);
