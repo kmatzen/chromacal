@@ -69,8 +69,21 @@ if [ "${CHROMACAL_SELF_CONTAINED:-0}" = "1" ]; then
     command -v dylibbundler >/dev/null \
         || { echo "need dylibbundler (brew install dylibbundler)"; exit 1; }
     mkdir -p "$bundle/Contents/Frameworks"
+    # Give dylibbundler explicit search paths for our deps — a from-source prefix
+    # (e.g. the lean OpenCV via CMAKE_PREFIX_PATH) and Homebrew — and feed it
+    # /dev/null on stdin so an unresolved dependency FAILS fast instead of blocking
+    # forever on dylibbundler's interactive "Where is <lib>?" prompt (no TTY in CI).
+    dbsearch=()
+    if [ -n "${CMAKE_PREFIX_PATH:-}" ]; then
+        IFS=':' read -ra _pfx <<< "$CMAKE_PREFIX_PATH"
+        for p in "${_pfx[@]}"; do [ -d "$p/lib" ] && dbsearch+=(-s "$p/lib"); done
+    fi
+    if brewlib="$(brew --prefix 2>/dev/null)/lib" && [ -d "$brewlib" ]; then
+        dbsearch+=(-s "$brewlib")
+    fi
     dylibbundler -of -b -x "$bundle/Contents/MacOS/chromacal" \
-        -d "$bundle/Contents/Frameworks" -p "@loader_path/../Frameworks/" >/dev/null
+        -d "$bundle/Contents/Frameworks" -p "@loader_path/../Frameworks/" \
+        ${dbsearch[@]+"${dbsearch[@]}"} </dev/null >/dev/null
 
     # Newer dyld refuses to load a dylib that has duplicate LC_RPATH commands
     # (dylibbundler can add @loader_path/../Frameworks/ to a lib that already has
