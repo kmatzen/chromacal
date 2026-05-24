@@ -322,12 +322,24 @@ double patch_reliability(const std::vector<cv::Vec3d>& pixels, const cv::Vec3d& 
 // ---------------------------------------------------------------------------
 
 std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure,
-                                    float lower_threshold, float upper_threshold) {
+                                    float lower_threshold, float upper_threshold,
+                                    ChartType chart, const std::vector<cv::Vec3d>* reference_lab) {
     std::vector<PatchStatistics> result;
+
+    // Chart layout + reference. SG140 has no bundled reference (X-Rite's data is
+    // licensed), so a custom reference must be supplied; Classic falls back to the
+    // built-in 24-patch reference.
+    const bool sg = (chart == ChartType::SG140);
+    const int cols = sg ? 14 : 6;
+    const int rows = sg ? 10 : 4;
+    const size_t num_patches = static_cast<size_t>(cols) * rows;
+    const std::vector<cv::Vec3d>& ref =
+        (reference_lab && reference_lab->size() >= num_patches) ? *reference_lab : kReferenceLab;
+    if (ref.size() < num_patches) return result; // SG without a reference -> can't solve
 
     // Detect ColorChecker
     auto detector = cv::mcc::CCheckerDetector::create();
-    if (!detector->process(image, cv::mcc::MCC24)) {
+    if (!detector->process(image, sg ? cv::mcc::SG140 : cv::mcc::MCC24)) {
         return result; // No chart found
     }
 
@@ -336,48 +348,23 @@ std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure,
 
     auto checker = checkers[0];
 
-    // Compute per-patch quad corners from the chart bounding box.
-    // getColorCharts() is unavailable before OpenCV 4.8, so we derive
-    // the patch grid ourselves using a perspective transform of the
-    // MCC24 6-column x 4-row layout.
-    std::vector<cv::Point2f> box = checker->getBox();
-    const int cols = 6, rows = 4;
-    const size_t num_patches = cols * rows;
-
-    // Ideal unit-square corners matching the order returned by getBox()
-    std::vector<cv::Point2f> ideal_box = {
-        {0.f, 0.f},
-        {static_cast<float>(cols), 0.f},
-        {static_cast<float>(cols), static_cast<float>(rows)},
-        {0.f, static_cast<float>(rows)}
-    };
-    cv::Mat H = cv::getPerspectiveTransform(ideal_box, box);
-
-    // Map each patch's four corners through the transform
-    std::vector<cv::Point2f> charts;
-    charts.reserve(num_patches * 4);
-    // Shrink factor so we sample inside each patch, not at the grid lines
-    const float margin = 0.15f;
-    for (int r = 0; r < rows; ++r) {
-        for (int c = 0; c < cols; ++c) {
-            std::vector<cv::Point2f> src = {
-                {c + margin,       r + margin},
-                {c + 1 - margin,   r + margin},
-                {c + 1 - margin,   r + 1 - margin},
-                {c + margin,       r + 1 - margin}
-            };
-            std::vector<cv::Point2f> dst;
-            cv::perspectiveTransform(src, dst, H);
-            charts.insert(charts.end(), dst.begin(), dst.end());
-        }
-    }
+    // Use the detector's authoritative per-patch sampling regions — the same
+    // central-module quads it uses internally for getChartsRGB — rather than
+    // re-deriving a uniform grid from getBox(). Verified on a real chart: the old
+    // getBox()+uniform-grid+0.15-margin approach sampled too wide a region per
+    // cell and biased patch means by ~10 (avg) to ~33 (max) levels (BGR 0..255),
+    // skewing the CCM/tone-curve fit. getColorCharts() returns 4 corners per
+    // patch in the same order as kReferenceLab (patch centers agree to ~1px), so
+    // it's a drop-in for the loop below.
+    std::vector<cv::Point2f> charts = checker->getColorCharts();
+    if (charts.size() < num_patches * 4) return result;
 
     // Convert to RGB float [0, 1]
     cv::Mat rgb_float;
     cv::cvtColor(image, rgb_float, cv::COLOR_BGR2RGB);
     rgb_float.convertTo(rgb_float, CV_64F, 1.0 / 255.0);
 
-    for (size_t idx = 0; idx < num_patches && idx < kReferenceLab.size(); ++idx) {
+    for (size_t idx = 0; idx < num_patches && idx < ref.size(); ++idx) {
         size_t corner_idx = idx * 4;
         std::vector<cv::Point> corners;
         for (size_t j = 0; j < 4; ++j) {
@@ -432,7 +419,12 @@ std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure,
         PatchStatistics stats;
         stats.mean = mean;
         stats.covariance = cov;
-        stats.reference_lab = kReferenceLab[idx];
+        stats.reference_lab = ref[idx];
+        // Patch center in normalized image coords (for the effect's overlay).
+        double cxsum = 0, cysum = 0;
+        for (const auto& pt : corners) { cxsum += pt.x; cysum += pt.y; }
+        if (image.cols > 0 && image.rows > 0)
+            stats.center = cv::Vec2d(cxsum / (4.0 * image.cols), cysum / (4.0 * image.rows));
         stats.exposure = exposure;
         stats.pixel_count = static_cast<int>(pixels.size());
         stats.raw_pixels = pixels;

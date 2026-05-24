@@ -17,3 +17,12 @@ __pycache__/
 .vscode/
 .DS_Store
 .venv/
+
+# Built native effect artifacts
+*.rsrc
+plugin/**/*.bundle
+plugin/**/*.plugin
+plugin/**/*.plugin
+
+# Release artifacts
+chromacal-*.pkg

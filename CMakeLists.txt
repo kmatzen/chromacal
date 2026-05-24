@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(CHROMACAL_BUILD_PYTHON "Build Python bindings" OFF)
 option(CHROMACAL_BUILD_EXAMPLES "Build examples" OFF)
 option(CHROMACAL_BUILD_TESTS "Build tests" OFF)
+option(CHROMACAL_BUILD_PPRO "Build the Premiere Pro plugin (native core + CLI)" OFF)
 
 # ------------------------------------------------------------------------------
 # Dependencies
@@ -29,6 +30,7 @@ add_library(chromacal
     src/detect.cpp
     src/solver.cpp
     src/apply.cpp
+    src/lut_ocio.cpp
 )
 
 set_target_properties(chromacal PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -83,6 +85,13 @@ if(CHROMACAL_BUILD_EXAMPLES)
 endif()
 
 # ------------------------------------------------------------------------------
+# Premiere Pro plugin
+# ------------------------------------------------------------------------------
+if(CHROMACAL_BUILD_PPRO)
+    add_subdirectory(plugin)
+endif()
+
+# ------------------------------------------------------------------------------
 # Tests
 # ------------------------------------------------------------------------------
 if(CHROMACAL_BUILD_TESTS)
@@ -103,7 +112,11 @@ if(CHROMACAL_BUILD_TESTS)
         tests/test_detect.cpp
         tests/test_solver.cpp
         tests/test_apply.cpp
+        tests/test_integration.cpp
+        tests/test_encode.cpp
     )
+    # test_encode.cpp pulls the effect's shared transfer-function header.
+    target_include_directories(chromacal_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/plugin/effect)
 
     target_link_libraries(chromacal_tests PRIVATE chromacal Catch2::Catch2WithMain)
     target_compile_definitions(chromacal_tests PRIVATE
