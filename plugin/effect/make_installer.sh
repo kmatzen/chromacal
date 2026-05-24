@@ -36,22 +36,30 @@ pkgbuild --root "$STAGE" --install-location "$DEST" \
 # Wrap in a product archive (so it's a normal double-click installer); sign it if
 # a Developer ID Installer identity is provided.
 if [ -n "${CHROMACAL_INSTALLER_ID:-}" ]; then
-    # productbuild --sign also contacts Apple's timestamp server (TSA) for the
-    # package signature; a stuck TSA call otherwise hangs the release. Bound it
-    # with a timeout + retry (gtimeout from coreutils; plain otherwise).
+    # Build the product archive UNSIGNED, then sign with `productsign`. We don't use
+    # `productbuild --sign`: in CI it silently blocked on keychain access to the
+    # Installer key (codesign with the App cert worked), because the keychain import
+    # authorizes `/usr/bin/productsign` (via -T) but not `productbuild`. No pkg-sig
+    # timestamp either — the embedded code is already timestamped, which is what
+    # notarization requires — so this also avoids a TSA dependency for the package.
+    # Still bounded with a timeout + retry (gtimeout from coreutils; plain otherwise).
     TIMEOUT_BIN="$(command -v gtimeout || command -v timeout || true)"
-    echo "==> [$(date +%T)] signing the .pkg (productbuild --sign)..."
+    UNSIGNED="${OUT%.pkg}-unsigned.pkg"
+    productbuild --package "$COMPONENT" "$UNSIGNED"
+    echo "==> [$(date +%T)] signing the .pkg (productsign)..."
     _signed=0
     for i in 1 2 3 4 5; do
+        rm -f "$OUT"
         if [ -n "$TIMEOUT_BIN" ]; then
-            "$TIMEOUT_BIN" 120 productbuild --package "$COMPONENT" --sign "$CHROMACAL_INSTALLER_ID" "$OUT" && { _signed=1; break; }
+            "$TIMEOUT_BIN" 120 productsign --sign "$CHROMACAL_INSTALLER_ID" "$UNSIGNED" "$OUT" && { _signed=1; break; }
         else
-            productbuild --package "$COMPONENT" --sign "$CHROMACAL_INSTALLER_ID" "$OUT" && { _signed=1; break; }
+            productsign --sign "$CHROMACAL_INSTALLER_ID" "$UNSIGNED" "$OUT" && { _signed=1; break; }
         fi
-        echo "  [retry $i/5] productbuild --sign stalled (TSA?); retrying..."
-        sleep $((i * 3))
+        echo "  [retry $i/5] productsign stalled; retrying..."
+        sleep $((i * 5))
     done
-    [ "$_signed" = 1 ] || { echo "::error::productbuild --sign failed after 5 retries"; exit 1; }
+    rm -f "$UNSIGNED"
+    [ "$_signed" = 1 ] || { echo "::error::productsign failed after 5 retries"; exit 1; }
     echo "==> [$(date +%T)] .pkg signed."
     if [ -n "${NOTARY_PROFILE:-}" ]; then
         echo "==> [$(date +%T)] notarizing $OUT (notarytool --wait --timeout 30m)..."
