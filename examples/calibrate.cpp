@@ -7,6 +7,7 @@
 
 #include <chromacal/chromacal.h>
 
+#include <algorithm>
 #include <iostream>
 
 int main(int argc, char** argv) {
@@ -34,18 +35,18 @@ int main(int argc, char** argv) {
     }
     std::cout << "  Found " << patches.size() << " patches" << std::endl;
 
-    // Filter by normality
-    auto filtered = chromacal::filter_normal(patches);
-    std::cout << "  " << filtered.size() << " pass normality tests" << std::endl;
-    if (filtered.size() < 10) {
-        std::cerr << "Too few valid patches (need >= 10)." << std::endl;
-        return 1;
-    }
+    // The solver down-weights unreliable patches internally via each patch's
+    // robust reliability score, so we pass all detected patches. (For pristine,
+    // high-bit-depth captures you may additionally cull patches up front with
+    // chromacal::filter_normal(patches) before solving.)
+    double min_rel = 1.0;
+    for (const auto& p : patches) min_rel = std::min(min_rel, p.reliability);
+    std::cout << "  lowest patch reliability: " << min_rel << std::endl;
 
     // 2. Solve
     std::cout << "Solving calibration..." << std::endl;
     chromacal::Solver solver;
-    solver.solve(filtered);
+    solver.solve(patches);
 
     auto ccm = solver.get_ccm();
     auto luma = solver.get_luma_params();
