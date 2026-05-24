@@ -213,6 +213,23 @@ OpenColorIO. Drop the result into a DaVinci Resolve or Premiere/Lumetri LUT slot
 Input domain is gamma-encoded RGB in `[0, 1]`; output is linear RGB at the
 reference exposure (written unclamped, so values may exceed `[0, 1]`).
 
+## Premiere Pro / After Effects plugin
+
+A native **video effect** ([`plugin/`](plugin/README.md)) brings Resolve-style
+ColorChecker calibration to Premiere: an After Effects-style effect with an
+*Analyze* button that detects the chart and applies the tone curve + CCM live in
+the render pipeline. It can also **Export a `.cube`** for Lumetri's Input LUT
+(the effect's exact transform; Premiere applies an Input LUT directly, so it
+matches the effect — measured ~0.5% mean over the chart).
+
+The SDK-free engine and a headless CLI build with no Adobe SDK at all:
+
+```bash
+cmake -B build -DCHROMACAL_BUILD_PPRO=ON
+cmake --build build --target chromacal_solve
+./build/plugin/chromacal_solve frame.png out.cube
+```
+
 ## License
 
 MIT

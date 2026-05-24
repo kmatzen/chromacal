@@ -8,6 +8,9 @@
 
 namespace chromacal {
 
+/// Which ColorChecker layout to detect.
+enum class ChartType { Classic24, SG140 };
+
 /// Detect a ColorChecker in an image and extract patch statistics.
 ///
 /// Uses OpenCV's MCC (Macbeth ColorChecker) detector to locate the chart,
@@ -18,10 +21,16 @@ namespace chromacal {
 ///                    Set to 1.0 if all images share the same exposure.
 /// @param lower_threshold  Minimum pixel value (0-1) to include (rejects blacks).
 /// @param upper_threshold  Maximum pixel value (0-1) to include (rejects clipped whites).
+/// @param chart       Chart layout (Classic 24-patch by default, or SG 140-patch).
+/// @param reference_lab  Optional custom reference Lab (D50) in patch order; required
+///                    for SG140 (whose reference data isn't bundled). When null,
+///                    the built-in 24-patch reference is used (Classic only).
 /// @return Patch statistics for each detected patch, or empty if detection fails.
 std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure = 1.0,
                                     float lower_threshold = 0.01f,
-                                    float upper_threshold = 0.99f);
+                                    float upper_threshold = 0.99f,
+                                    ChartType chart = ChartType::Classic24,
+                                    const std::vector<cv::Vec3d>* reference_lab = nullptr);
 
 /// Run multivariate normality tests on a set of 3D pixel samples.
 ///

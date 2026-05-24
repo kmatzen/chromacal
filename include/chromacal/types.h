@@ -23,6 +23,7 @@ struct PatchStatistics {
     cv::Vec3d mean;                    ///< Mean RGB color (gamma-encoded, 0-1).
     cv::Matx33d covariance;            ///< 3x3 RGB covariance matrix.
     cv::Vec3d reference_lab;           ///< Reference CIE Lab color (D50).
+    cv::Vec2d center{-1, -1};          ///< Patch center in normalized image coords [0,1] (-1 if unknown).
     double exposure = 1.0;             ///< Relative exposure value.
     int pixel_count = 0;               ///< Number of valid pixels.
     std::vector<cv::Vec3d> raw_pixels; ///< Raw pixel values for normality testing.

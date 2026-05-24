@@ -1,0 +1,140 @@
+name: CI (Windows core)
+
+# Validates that the portable C++ (core library + CLIs + tests) compiles on MSVC
+# and passes ctest on Windows. The native effect (chromacal.aex) is NOT built here
+# — it needs the gated Adobe SDKs — so this is the Windows analog of the core test
+# gate, catching MSVC-only portability issues (M_PI, stricter conformance, etc.).
+#
+# Heavy first run (vcpkg builds OpenCV[contrib]+Ceres+OCIO); the vcpkg binary cache
+# makes reruns fast. Scoped to pushes that touch C++/CMake so it doesn't run on docs.
+
+on:
+  push:
+    paths:
+      - "src/**"
+      - "include/**"
+      - "plugin/**"
+      - "tests/**"
+      - "examples/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/windows-ci.yml"
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg_cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare vcpkg binary cache
+        run: New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+
+      - name: Cache vcpkg binaries
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-x64-windows-opencvcontrib-ceres-eigen-ocio-v1
+
+      - name: Install dependencies (vcpkg)
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install --triplet x64-windows `
+            "opencv4[contrib,dnn]" ceres eigen3 opencolorio
+          if ($LASTEXITCODE) { throw "vcpkg install failed" }
+
+      - name: Configure
+        # BUILD_PPRO builds the plugin core + CLIs and registers the plugin CTests.
+        # The native effect / UXP addon stay skipped (no Adobe SDK here).
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCHROMACAL_BUILD_TESTS=ON -DCHROMACAL_BUILD_EXAMPLES=ON -DCHROMACAL_BUILD_PPRO=ON `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows
+          if ($LASTEXITCODE) { throw "configure failed" }
+
+      - name: Build
+        run: |
+          cmake --build build --config Release
+          if ($LASTEXITCODE) { throw "build failed" }
+
+      - name: Test
+        run: |
+          ctest --test-dir build -C Release --output-on-failure
+          if ($LASTEXITCODE) { throw "ctest failed" }
+
+  # Build the actual Premiere/AE effect (chromacal.aex) — needs the gated Adobe
+  # SDKs (fetched from the private repo, same as the macOS release). This validates
+  # the Windows PiPL automation (win_pipl.cmake) end to end and uploads the .aex.
+  build-effect:
+    name: Build chromacal.aex (effect)
+    needs: build-and-test          # run after the core job so the vcpkg cache is warm
+    runs-on: windows-latest
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg_cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare vcpkg binary cache
+        run: New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+
+      - name: Cache vcpkg binaries
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-x64-windows-opencvcontrib-ceres-eigen-ocio-v1
+
+      - name: Install dependencies (vcpkg)
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install --triplet x64-windows `
+            "opencv4[contrib,dnn]" ceres eigen3 opencolorio
+          if ($LASTEXITCODE) { throw "vcpkg install failed" }
+
+      - name: Fetch Adobe SDKs (private repo)
+        env:
+          GH_TOKEN: ${{ secrets.ADOBE_SDK_PAT }}
+          ADOBE_SDK_REPO: ${{ vars.ADOBE_SDK_REPO }}
+          ADOBE_SDK_TAG: ${{ vars.ADOBE_SDK_TAG }}
+        run: |
+          if (-not $env:GH_TOKEN) { throw "ADOBE_SDK_PAT secret not set" }
+          gh release download $env:ADOBE_SDK_TAG -R $env:ADOBE_SDK_REPO `
+            --pattern adobe-sdks.tar.gz --dir $env:RUNNER_TEMP --clobber
+          if ($LASTEXITCODE) { throw "SDK download failed (PAT needs Contents:read on $env:ADOBE_SDK_REPO)" }
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\adobe-sdks" | Out-Null
+          tar -xzf "$env:RUNNER_TEMP\adobe-sdks.tar.gz" -C "$env:RUNNER_TEMP\adobe-sdks"
+          "PRSDK_DIR=$env:RUNNER_TEMP\adobe-sdks\Premiere\Examples\Headers"     | Out-File $env:GITHUB_ENV -Append
+          "AESDK_DIR=$env:RUNNER_TEMP\adobe-sdks\AfterEffects\Examples\Headers" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Configure (with Adobe SDKs)
+        # VS generator: the PiPL custom build step (win_pipl.cmake) runs in the MSVC
+        # env, and rc.exe compiles + links the generated .rc automatically.
+        run: |
+          cmake -B build-effect -G "Visual Studio 17 2022" -A x64 `
+            -DCHROMACAL_BUILD_PPRO=ON `
+            -DCHROMACAL_PRSDK_DIR="$env:PRSDK_DIR" `
+            -DCHROMACAL_AESDK_DIR="$env:AESDK_DIR" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows
+          if ($LASTEXITCODE) { throw "configure failed" }
+
+      - name: Build chromacal.aex
+        run: |
+          cmake --build build-effect --config Release --target chromacal_effect
+          if ($LASTEXITCODE) { throw "effect build failed" }
+
+      - name: Verify + locate chromacal.aex
+        run: |
+          $aex = Get-ChildItem -Path build-effect -Recurse -Filter chromacal.aex | Select-Object -First 1
+          if (-not $aex) { throw "chromacal.aex not produced" }
+          Write-Host "Built $($aex.FullName) ($([int]($aex.Length/1KB)) KB)"
+          "AEX_PATH=$($aex.FullName)" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Upload chromacal.aex
+        uses: actions/upload-artifact@v4
+        with:
+          name: chromacal-aex-win-x64
+          path: ${{ env.AEX_PATH }}

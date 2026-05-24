@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <style>
+        :root { color-scheme: dark; }
+        html, body { height: 100%; }
+        body {
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            font-size: 12px;
+            color: #e6e6e6;
+            margin: 0;
+            padding: 12px;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+        h1 { font-size: 14px; margin: 0 0 2px; }
+        .sub { color: #9a9a9a; margin: 0 0 12px; font-size: 11px; }
+        button {
+            width: 100%;
+            padding: 8px;
+            margin: 4px 0;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #2b7de9;
+            color: #fff;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        button.secondary { background: #3a3a3a; }
+        button:disabled { opacity: 0.4; cursor: default; }
+        #status { margin: 10px 0; min-height: 16px; color: #cfcfcf; }
+        #status.err { color: #ff7676; }
+        #status.ok { color: #7fd18a; }
+        .results { display: none; margin-top: 8px; border-top: 1px solid #444; padding-top: 8px; }
+        .row { display: flex; justify-content: space-between; margin: 2px 0; }
+        .row .k { color: #9a9a9a; }
+        .ccm { font-family: monospace; font-size: 11px; white-space: pre; margin-top: 6px; color: #cfcfcf; }
+        .hr { height: 1px; background: #444; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>chromacal</h1>
+    <p class="sub">Full-resolution ColorChecker analysis &rarr; chromacal effect</p>
+
+    <button id="btnFrame">Calibrate from current frame</button>
+    <button id="btnFile" class="secondary">Calibrate from image file&hellip;</button>
+
+    <div id="status"></div>
+
+    <div class="results" id="results">
+        <div class="row"><span class="k">Patches detected</span><span id="rPatches">&ndash;</span></div>
+        <div class="row"><span class="k">Lowest reliability</span><span id="rRel">&ndash;</span></div>
+        <div class="row"><span class="k">Final error</span><span id="rErr">&ndash;</span></div>
+        <div class="ccm" id="rCcm"></div>
+    </div>
+
+    <div class="hr"></div>
+    <button id="btnExport" class="secondary">Export current frame &rarr; /tmp&hellip;</button>
+    <p class="sub">Parity test: export with the effect's Apply OFF (raw) and ON (applied), then run <code>tests/ppro_parity.sh</code>.</p>
+
+    <div class="hr"></div>
+    <button id="btnSavePreset" disabled>Save calibration preset&hellip;</button>
+    <p class="sub">Then in the clip's <b>chromacal</b> effect: <b>Load calibration</b> &rarr; pick this file.</p>
+    <button id="btnSave" class="secondary" disabled>Save .cube for Lumetri&hellip;</button>
+    <button id="btnApply" class="secondary" disabled>Apply LUT to selected clip</button>
+
+    <script src="src/main.js"></script>
+</body>
+</html>

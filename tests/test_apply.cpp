@@ -166,6 +166,7 @@ TEST_CASE("write_cube writes a valid .cube file", "[apply]") {
     CHECK(all_three_floats);
     CHECK(data_lines == N * N * N); // red x green x blue grid points
 
+    in.close(); // Windows can't remove a file with an open handle (Unix can).
     std::filesystem::remove(path);
 }
 

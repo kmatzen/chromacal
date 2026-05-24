@@ -57,7 +57,10 @@ jobs:
           path: dist/*.tar.gz
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Publish the Python package only on real version tags — not prerelease tags
+    # (e.g. v0.1.0-rc1, which carry a '-'). Those are used for plugin release
+    # dry-runs and must not push to PyPI.
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
     environment: pypi
@@ -73,3 +76,6 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A re-run / unchanged version shouldn't hard-fail on an existing upload.
+          skip-existing: true
