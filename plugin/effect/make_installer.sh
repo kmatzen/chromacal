@@ -38,9 +38,11 @@ pkgbuild --root "$STAGE" --install-location "$DEST" \
 if [ -n "${CHROMACAL_INSTALLER_ID:-}" ]; then
     productbuild --package "$COMPONENT" --sign "$CHROMACAL_INSTALLER_ID" "$OUT"
     if [ -n "${NOTARY_PROFILE:-}" ]; then
-        echo "Notarizing $OUT ..."
+        echo "==> [$(date +%T)] notarizing $OUT (notarytool --wait --timeout 30m)..."
         xcrun notarytool submit "$OUT" --keychain-profile "$NOTARY_PROFILE" --wait --timeout 30m
+        echo "==> [$(date +%T)] stapling $OUT..."
         xcrun stapler staple "$OUT"
+        echo "==> [$(date +%T)] notarized + stapled $OUT"
     fi
 else
     productbuild --package "$COMPONENT" "$OUT"
