@@ -3,7 +3,18 @@
 All notable changes to chromacal. Versions follow the plugin's
 `CFBundleShortVersionString` / PiPL `AE_Effect_Version`.
 
-## [Unreleased]
+## [0.1.1] - 2026-05-24
+
+First release of the native Premiere/After Effects plugin. Builds (macOS + Windows)
+and the signed + notarized macOS `.pkg` are produced by GitHub Actions.
+
+### Changed
+- **Leaner bundle** — the macOS build now links a lean OpenCV built without OpenVINO
+  (`WITH_OPENVINO=OFF`), dropping ~114 MB of unused inference dylibs that `dnn`
+  otherwise drags in.
+- **Robust release signing** — bounded `codesign --timestamp`, `productsign`, and
+  `notarytool` against a stuck Apple timestamp/notary service (timeouts + retries),
+  and sign the `.pkg` with `productsign` (not `productbuild --sign`).
 
 ### Added
 - **Native Premiere/After Effects effect** — Analyze a ColorChecker on the current

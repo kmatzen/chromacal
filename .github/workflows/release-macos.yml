@@ -40,9 +40,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build dependencies
-        # coreutils provides gtimeout, used to bound each codesign --timestamp call.
-        run: brew install eigen ceres-solver opencolorio opencv dylibbundler coreutils
+      - name: Cache lean OpenCV (no OpenVINO)
+        uses: actions/cache@v4
+        with:
+          path: ~/cv-lean
+          key: macos-opencv-4.13.0-noopenvino-mcc-v1
+
+      - name: Install build dependencies (OpenCV without OpenVINO)
+        # Homebrew's OpenCV links OpenVINO via dnn (114 MB), which dylibbundler then
+        # bundles. Build a lean OpenCV (mcc+imgcodecs, WITH_OPENVINO=OFF) from source,
+        # cached. coreutils provides gtimeout (bounds codesign --timestamp).
+        run: |
+          set -e
+          brew install eigen ceres-solver opencolorio dylibbundler coreutils
+          PREFIX="$HOME/cv-lean"
+          if [ ! -e "$PREFIX/.complete" ]; then
+            git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv.git /tmp/opencv
+            git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv_contrib.git /tmp/ocv_contrib
+            cmake -S /tmp/opencv -B /tmp/opencv/build -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+              -DOPENCV_EXTRA_MODULES_PATH=/tmp/ocv_contrib/modules \
+              -DBUILD_LIST=mcc,imgcodecs -DWITH_OPENVINO=OFF -DWITH_TBB=OFF \
+              -DWITH_FFMPEG=OFF -DWITH_GSTREAMER=OFF \
+              -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+              -DBUILD_opencv_apps=OFF -DBUILD_DOCS=OFF
+            cmake --build /tmp/opencv/build -j"$(sysctl -n hw.ncpu)" && cmake --install /tmp/opencv/build
+            touch "$PREFIX/.complete"
+          fi
+          echo "CMAKE_PREFIX_PATH=$PREFIX" >> "$GITHUB_ENV"
 
       - name: Provide the Adobe SDKs (not redistributable)
         id: sdk
