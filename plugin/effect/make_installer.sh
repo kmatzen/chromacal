@@ -36,7 +36,23 @@ pkgbuild --root "$STAGE" --install-location "$DEST" \
 # Wrap in a product archive (so it's a normal double-click installer); sign it if
 # a Developer ID Installer identity is provided.
 if [ -n "${CHROMACAL_INSTALLER_ID:-}" ]; then
-    productbuild --package "$COMPONENT" --sign "$CHROMACAL_INSTALLER_ID" "$OUT"
+    # productbuild --sign also contacts Apple's timestamp server (TSA) for the
+    # package signature; a stuck TSA call otherwise hangs the release. Bound it
+    # with a timeout + retry (gtimeout from coreutils; plain otherwise).
+    TIMEOUT_BIN="$(command -v gtimeout || command -v timeout || true)"
+    echo "==> [$(date +%T)] signing the .pkg (productbuild --sign)..."
+    _signed=0
+    for i in 1 2 3 4 5; do
+        if [ -n "$TIMEOUT_BIN" ]; then
+            "$TIMEOUT_BIN" 120 productbuild --package "$COMPONENT" --sign "$CHROMACAL_INSTALLER_ID" "$OUT" && { _signed=1; break; }
+        else
+            productbuild --package "$COMPONENT" --sign "$CHROMACAL_INSTALLER_ID" "$OUT" && { _signed=1; break; }
+        fi
+        echo "  [retry $i/5] productbuild --sign stalled (TSA?); retrying..."
+        sleep $((i * 3))
+    done
+    [ "$_signed" = 1 ] || { echo "::error::productbuild --sign failed after 5 retries"; exit 1; }
+    echo "==> [$(date +%T)] .pkg signed."
     if [ -n "${NOTARY_PROFILE:-}" ]; then
         echo "==> [$(date +%T)] notarizing $OUT (notarytool --wait --timeout 30m)..."
         xcrun notarytool submit "$OUT" --keychain-profile "$NOTARY_PROFILE" --wait --timeout 30m
