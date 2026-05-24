@@ -3,6 +3,12 @@
 
 #include "chromacal/apply.h"
 
+#include <cctype>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+
 using namespace chromacal;
 
 // Synthetic patches (same as test_solver.cpp)
@@ -122,4 +128,50 @@ TEST_CASE("LUT size affects precision", "[apply]") {
     for (int c = 0; c < 3; ++c) {
         CHECK(std::abs(ps[c] - pl[c]) < 0.05);
     }
+}
+
+TEST_CASE("write_cube writes a valid .cube file", "[apply]") {
+    auto solver = make_fitted_solver();
+    const int N = 9;
+    auto path = (std::filesystem::temp_directory_path() / "chromacal_test.cube").string();
+
+    write_cube(solver, path, N, "test");
+
+    std::ifstream in(path);
+    REQUIRE(in.is_open());
+
+    bool saw_size = false;
+    bool saw_domain_max = false;
+    int data_lines = 0;
+    bool all_three_floats = true;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.rfind("LUT_3D_SIZE", 0) == 0) {
+            saw_size = true;
+            CHECK(line == "LUT_3D_SIZE 9");
+        } else if (line.rfind("DOMAIN_MAX", 0) == 0) {
+            saw_domain_max = true;
+        } else if (!line.empty() &&
+                   (std::isdigit(static_cast<unsigned char>(line[0])) || line[0] == '-')) {
+            ++data_lines;
+            // Each data row must be exactly three parseable floats.
+            std::istringstream ss(line);
+            double r, g, b;
+            if (!(ss >> r >> g >> b)) all_three_floats = false;
+        }
+    }
+
+    CHECK(saw_size);
+    CHECK(saw_domain_max);
+    CHECK(all_three_floats);
+    CHECK(data_lines == N * N * N); // red x green x blue grid points
+
+    in.close(); // Windows can't remove a file with an open handle (Unix can).
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("write_cube rejects degenerate grid sizes", "[apply]") {
+    auto solver = make_fitted_solver();
+    auto path = (std::filesystem::temp_directory_path() / "chromacal_bad.cube").string();
+    CHECK_THROWS(write_cube(solver, path, 1, "bad"));
 }

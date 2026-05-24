@@ -1,0 +1,27 @@
+{
+    "manifestVersion": 5,
+    "id": "com.chromacal.colorchecker",
+    "name": "chromacal ColorChecker Calibration",
+    "version": "0.1.0",
+    "main": "index.html",
+    "host": [
+        {
+            "app": "premierepro",
+            "minVersion": "26.2.0"
+        }
+    ],
+    "entrypoints": [
+        {
+            "type": "panel",
+            "id": "chromacal.panel",
+            "label": { "default": "chromacal" },
+            "minimumSize": { "width": 240, "height": 260 },
+            "preferredDockedSize": { "width": 320, "height": 440 },
+            "preferredFloatingSize": { "width": 340, "height": 460 }
+        }
+    ],
+    "requiredPermissions": {
+        "localFileSystem": "fullAccess",
+        "allowCodeGenerationFromStrings": false
+    }
+}

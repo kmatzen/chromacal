@@ -2,9 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   build-and-test:
@@ -17,33 +15,111 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Cache the from-source deps so only the first run pays the build cost.
+      # Bump the trailing -vN to force a rebuild.
+      - name: Cache Linux deps (Ceres + OCIO + OpenCV/contrib)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/cvdeps
+          key: linux-cvdeps-ceres2.2.0-ocio2.5.1-opencv4.13.0-v1
+
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
+          set -e
           sudo apt-get update
-          sudo apt-get install -y cmake libeigen3-dev libopencv-dev libgoogle-glog-dev libgflags-dev libsuitesparse-dev
-
-          # Ceres Solver
-          git clone --depth 1 --branch 2.2.0 https://github.com/ceres-solver/ceres-solver.git /tmp/ceres
-          cmake -S /tmp/ceres -B /tmp/ceres/build -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release
-          cmake --build /tmp/ceres/build -j$(nproc)
-          sudo cmake --install /tmp/ceres/build
-
-          # OpenColorIO
-          git clone --depth 1 --branch v2.3.2 https://github.com/AcademySoftwareFoundation/OpenColorIO.git /tmp/ocio
-          cmake -S /tmp/ocio -B /tmp/ocio/build -DOCIO_BUILD_APPS=OFF -DOCIO_BUILD_TESTS=OFF -DOCIO_BUILD_GPU_TESTS=OFF -DOCIO_BUILD_PYTHON=OFF -DCMAKE_BUILD_TYPE=Release
-          cmake --build /tmp/ocio/build -j$(nproc)
-          sudo cmake --install /tmp/ocio/build
+          # Ubuntu's libopencv-dev is 4.6 — too old for cv::mcc::CChecker::getColorCharts()
+          # (added in 4.7), so OpenCV is built from source below; keep only the rest.
+          sudo apt-get install -y cmake libeigen3-dev libgoogle-glog-dev libgflags-dev \
+            libsuitesparse-dev libpng-dev libjpeg-dev libtiff-dev zlib1g-dev
+          PREFIX="$HOME/cvdeps"
+          if [ ! -e "$PREFIX/.complete" ]; then
+            # Ceres Solver
+            git clone --depth 1 --branch 2.2.0 https://github.com/ceres-solver/ceres-solver.git /tmp/ceres
+            cmake -S /tmp/ceres -B /tmp/ceres/build -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX="$PREFIX"
+            cmake --build /tmp/ceres/build -j"$(nproc)" && cmake --install /tmp/ceres/build
+            # OpenColorIO
+            git clone --depth 1 --branch v2.5.1 https://github.com/AcademySoftwareFoundation/OpenColorIO.git /tmp/ocio
+            cmake -S /tmp/ocio -B /tmp/ocio/build -DCMAKE_BUILD_TYPE=Release \
+              -DOCIO_BUILD_APPS=OFF -DOCIO_BUILD_TESTS=OFF -DOCIO_BUILD_GPU_TESTS=OFF \
+              -DOCIO_BUILD_PYTHON=OFF -DCMAKE_INSTALL_PREFIX="$PREFIX"
+            cmake --build /tmp/ocio/build -j"$(nproc)" && cmake --install /tmp/ocio/build
+            # OpenCV + contrib (mcc) — pinned to 4.13.0 to match the macOS/Homebrew
+            # build, so getColorCharts() is present. Only the modules we use.
+            git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv.git /tmp/opencv
+            git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv_contrib.git /tmp/opencv_contrib
+            cmake -S /tmp/opencv -B /tmp/opencv/build -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+              -DOPENCV_EXTRA_MODULES_PATH=/tmp/opencv_contrib/modules \
+              -DBUILD_LIST=mcc,imgcodecs \
+              -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+              -DBUILD_opencv_apps=OFF -DBUILD_DOCS=OFF \
+              -DWITH_FFMPEG=OFF -DWITH_GSTREAMER=OFF -DWITH_GTK=OFF -DWITH_V4L=OFF \
+              -DWITH_1394=OFF -DWITH_OPENEXR=OFF -DWITH_TBB=OFF
+            cmake --build /tmp/opencv/build -j"$(nproc)" && cmake --install /tmp/opencv/build
+            touch "$PREFIX/.complete"
+          fi
+          # Make the from-source deps findable at configure + run time.
+          echo "CMAKE_PREFIX_PATH=$PREFIX" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$PREFIX/lib:$PREFIX/lib64:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install eigen ceres-solver opencolorio opencv
 
       - name: Configure
-        run: cmake -B build -DCHROMACAL_BUILD_TESTS=ON -DCHROMACAL_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release
+        # BUILD_PPRO builds the plugin core + CLIs and registers the plugin CTests
+        # (ppro_core_smoke, cube_reproduces_effect). The native effect / UXP addon
+        # stay skipped here (they need the gated Adobe SDKs).
+        run: cmake -B build -DCHROMACAL_BUILD_TESTS=ON -DCHROMACAL_BUILD_EXAMPLES=ON -DCHROMACAL_BUILD_PPRO=ON -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
       - name: Test
         run: cd build && ctest --output-on-failure
+
+  # Proof that the macOS Premiere/AE effect (chromacal.plugin) actually BUILDS on
+  # GitHub — fetches the gated Adobe SDKs from the private repo and runs the real
+  # bundle build (compile + Rez PiPL + dylibbundler). No signing/notarization here
+  # (that's a separate distribution concern handled by release-macos.yml); this is
+  # a fast, reliable "the plugin builds" signal. Uploads the bundle as an artifact.
+  build-effect-macos:
+    name: Build chromacal.plugin (effect, macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (macOS)
+        run: brew install eigen ceres-solver opencolorio opencv dylibbundler
+
+      - name: Fetch Adobe SDKs (private repo)
+        env:
+          GH_TOKEN: ${{ secrets.ADOBE_SDK_PAT }}
+          ADOBE_SDK_REPO: ${{ vars.ADOBE_SDK_REPO }}
+          ADOBE_SDK_TAG: ${{ vars.ADOBE_SDK_TAG }}
+        run: |
+          set -euo pipefail
+          [ -n "${GH_TOKEN:-}" ] || { echo "::error::ADOBE_SDK_PAT secret not set"; exit 1; }
+          gh release download "$ADOBE_SDK_TAG" -R "$ADOBE_SDK_REPO" \
+            --pattern adobe-sdks.tar.gz --dir "$RUNNER_TEMP" --clobber
+          mkdir -p "$RUNNER_TEMP/adobe-sdks"
+          tar -xzf "$RUNNER_TEMP/adobe-sdks.tar.gz" -C "$RUNNER_TEMP/adobe-sdks"
+          echo "PRSDK_DIR=$RUNNER_TEMP/adobe-sdks/Premiere/Examples/Headers"     >> "$GITHUB_ENV"
+          echo "AESDK_DIR=$RUNNER_TEMP/adobe-sdks/AfterEffects/Examples/Headers" >> "$GITHUB_ENV"
+
+      - name: Build the effect bundle (self-contained, no signing)
+        run: CHROMACAL_SELF_CONTAINED=1 plugin/effect/build_bundle.sh
+
+      - name: Verify + package the bundle for upload
+        run: |
+          test -d build/plugin/chromacal.plugin || { echo "::error::bundle not built"; exit 1; }
+          ditto -c -k --keepParent build/plugin/chromacal.plugin "$RUNNER_TEMP/chromacal-bundle.zip"
+
+      - name: Upload chromacal.plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: chromacal-bundle-macos
+          path: ${{ runner.temp }}/chromacal-bundle.zip
