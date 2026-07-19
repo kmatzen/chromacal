@@ -36,6 +36,11 @@ add_library(chromacal
 set_target_properties(chromacal PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(chromacal::chromacal ALIAS chromacal)
 
+target_compile_options(chromacal PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+)
+
 target_include_directories(chromacal
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

@@ -20,6 +20,10 @@ on:
       - ".github/workflows/windows-ci.yml"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: pwsh
