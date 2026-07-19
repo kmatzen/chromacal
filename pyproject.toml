@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "chromacal"
-version = "0.1.0"
+version = "0.1.1"
 description = "ColorChecker camera calibration: detect, solve, apply. Log-polynomial tone curve + CCM via Ceres, OCIO 3D LUT export."
 readme = "README.md"
 license = "MIT"
@@ -66,9 +66,12 @@ before-all = [
     "yum install -y epel-release || true",
     "yum install -y eigen3-devel || true",
     "pip install cmake",
-    # Build OpenCV with contrib (mcc module) from source — distro only has 3.4
-    "git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv.git /tmp/opencv",
-    "git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv_contrib.git /tmp/opencv_contrib",
+    # Build OpenCV with contrib (mcc module) from source — distro only has 3.4.
+    # Pinned to 4.13.0 to match ci.yml/windows-ci.yml (and the macOS/Homebrew
+    # release build): a different OpenCV version here means the published
+    # wheels run a different MCC detector than what CI actually tests.
+    "git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv.git /tmp/opencv",
+    "git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv_contrib.git /tmp/opencv_contrib",
     "cmake -S /tmp/opencv -B /tmp/opencv/build -DOPENCV_EXTRA_MODULES_PATH=/tmp/opencv_contrib/modules -DBUILD_LIST=core,imgproc,calib3d,mcc -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_opencv_apps=OFF -DBUILD_opencv_python3=OFF -DWITH_FFMPEG=OFF -DWITH_GTK=OFF -DWITH_V4L=OFF -DCMAKE_BUILD_TYPE=Release",
     "cmake --build /tmp/opencv/build -j$(nproc) && cmake --install /tmp/opencv/build",
     # Build Ceres from source
