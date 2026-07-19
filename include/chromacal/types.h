@@ -1,6 +1,7 @@
 #pragma once
 
 #include <opencv2/opencv.hpp>
+#include <string>
 #include <vector>
 
 namespace chromacal {
@@ -46,6 +47,8 @@ struct CalibrationResult {
     cv::Mat color_matrix;            ///< 3x3 color correction matrix.
     double final_error = 0.0;        ///< Final optimization cost.
     double reference_exposure = 1.0; ///< Reference exposure for normalization.
+    std::string report;              ///< Brief solver summary (see Solver::get_report()).
+    bool converged = true;           ///< Ceres Summary::IsSolutionUsable() (see Solver::converged()).
 };
 
 } // namespace chromacal
