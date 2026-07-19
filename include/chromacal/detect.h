@@ -26,6 +26,7 @@ enum class ChartType { Classic24, SG140 };
 ///                    for SG140 (whose reference data isn't bundled). When null,
 ///                    the built-in 24-patch reference is used (Classic only).
 /// @return Patch statistics for each detected patch, or empty if detection fails.
+/// @throws std::invalid_argument if image is not CV_8UC3.
 std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure = 1.0,
                                     float lower_threshold = 0.01f,
                                     float upper_threshold = 0.99f,

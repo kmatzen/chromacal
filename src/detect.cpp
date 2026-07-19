@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iostream>
 #include <numeric>
+#include <stdexcept>
 
 namespace chromacal {
 
@@ -26,20 +27,59 @@ static const std::vector<cv::Vec3d> kReferenceLab = {
 // Statistical tests
 // ---------------------------------------------------------------------------
 
+// Regularized lower incomplete gamma P(a, y) via the power series. Converges
+// quickly for y < a + 1; for larger y the series terms grow before decaying
+// and a fixed iteration cap truncates while still climbing, understating the
+// tail (see gamma_q below, used for that regime instead).
+static double gamma_p_series(double a, double y) {
+    if (y <= 0.0) return 0.0;
+    double ap = a;
+    double sum = 1.0 / a;
+    double del = sum;
+    for (int n = 0; n < 500; ++n) {
+        ap += 1.0;
+        del *= y / ap;
+        sum += del;
+        if (std::abs(del) < std::abs(sum) * 1e-15) break;
+    }
+    return sum * std::exp(-y + a * std::log(y) - std::lgamma(a));
+}
+
+// Regularized upper incomplete gamma Q(a, y) via a continued fraction
+// (modified Lentz's method). Converges quickly for y >= a + 1, the regime
+// where the series above is unreliable.
+static double gamma_q_cf(double a, double y) {
+    const double kFpMin = 1e-300;
+    double b = y + 1.0 - a;
+    double c = 1.0 / kFpMin;
+    double d = 1.0 / b;
+    double h = d;
+    for (int i = 1; i <= 500; ++i) {
+        double an = -static_cast<double>(i) * (static_cast<double>(i) - a);
+        b += 2.0;
+        d = an * d + b;
+        if (std::abs(d) < kFpMin) d = kFpMin;
+        c = b + an / c;
+        if (std::abs(c) < kFpMin) c = kFpMin;
+        d = 1.0 / d;
+        double del = d * c;
+        h *= del;
+        if (std::abs(del - 1.0) < 1e-15) break;
+    }
+    return std::exp(-y + a * std::log(y) - std::lgamma(a)) * h;
+}
+
+// Survival function of a chi-square distribution with df degrees of freedom,
+// i.e. Q(df/2, x/2) in regularized-incomplete-gamma terms. Dispatches to
+// whichever of the two representations above converges quickly for the given
+// x, so it stays accurate (and monotonic in x) well beyond the range where a
+// single truncated series would silently invert.
 static double chi_square_sf(double x, double df) {
-    // Regularized upper incomplete gamma function via series expansion
     if (x <= 0.0) return 1.0;
     double a = df / 2.0;
-    double sum = 0.0;
-    double term = 1.0 / a;
-    sum = term;
-    for (int k = 1; k < 200; ++k) {
-        term *= (x / 2.0) / (a + k);
-        sum += term;
-        if (std::abs(term) < 1e-12 * std::abs(sum)) break;
-    }
-    double p = sum * std::exp(-x / 2.0 + a * std::log(x / 2.0) - std::lgamma(a));
-    return std::max(0.0, std::min(1.0, 1.0 - p));
+    double y = x / 2.0;
+    double q = (y < a + 1.0) ? 1.0 - gamma_p_series(a, y) : gamma_q_cf(a, y);
+    return std::max(0.0, std::min(1.0, q));
 }
 
 static double normal_sf(double x) {
@@ -238,7 +278,9 @@ double henze_zirkler_test(const std::vector<cv::Vec3d>& pixels, const cv::Vec3d&
 NormalityTestResults test_normality(const std::vector<cv::Vec3d>& pixels, double alpha) {
     NormalityTestResults results;
     results.shapiro_pvalues.resize(3);
-    results.passes_shapiro_per_channel.resize(3);
+    // assign() rather than resize(): the latter trips a known GCC -O3 false
+    // positive (-Warray-bounds on the inlined std::vector<bool> fill path).
+    results.passes_shapiro_per_channel.assign(3, false);
 
     if (pixels.size() < 3) {
         results.overall_passes = false;
@@ -324,6 +366,13 @@ double patch_reliability(const std::vector<cv::Vec3d>& pixels, const cv::Vec3d& 
 std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure,
                                     float lower_threshold, float upper_threshold,
                                     ChartType chart, const std::vector<cv::Vec3d>* reference_lab) {
+    if (image.type() != CV_8UC3)
+        throw std::invalid_argument(
+            "chromacal::detect: image must be CV_8UC3 (8-bit BGR); got a different "
+            "type or channel count. Convert with cv::Mat::convertTo()/cv::cvtColor() "
+            "first -- detect() assumes 8-bit input and silently mis-scales anything "
+            "else (e.g. 16-bit or float images).");
+
     std::vector<PatchStatistics> result;
 
     // Chart layout + reference. SG140 has no bundled reference (X-Rite's data is
@@ -372,20 +421,27 @@ std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure,
             corners.push_back(cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)));
         }
 
-        cv::Mat mask = cv::Mat::zeros(image.size(), CV_8UC1);
-        cv::fillConvexPoly(mask, corners, cv::Scalar(255));
+        // Rasterize into a bbox-sized mask (not a full-frame one): a fillConvexPoly
+        // covering ~0.1% of the frame doesn't need an O(image size) allocation +
+        // zero-fill repeated per patch (24-140x per detect() call). Intersecting
+        // with the image rect also clamps a quad that pokes outside the frame,
+        // which the old min/max-based clamp didn't do for boundingRect() itself.
+        cv::Rect bbox = cv::boundingRect(corners) & cv::Rect(0, 0, rgb_float.cols, rgb_float.rows);
+        if (bbox.width <= 0 || bbox.height <= 0) continue;
+
+        cv::Mat mask = cv::Mat::zeros(bbox.size(), CV_8UC1);
+        std::vector<cv::Point> local_corners;
+        local_corners.reserve(corners.size());
+        for (const auto& c : corners) local_corners.push_back(c - bbox.tl());
+        cv::fillConvexPoly(mask, local_corners, cv::Scalar(255));
 
         std::vector<cv::Vec3d> pixels;
-        cv::Rect bbox = cv::boundingRect(corners);
-        int min_y = std::max(0, bbox.y);
-        int max_y = std::min(rgb_float.rows - 1, bbox.y + bbox.height);
-        int min_x = std::max(0, bbox.x);
-        int max_x = std::min(rgb_float.cols - 1, bbox.x + bbox.width);
-
-        for (int y = min_y; y <= max_y; ++y) {
-            for (int x = min_x; x <= max_x; ++x) {
-                if (mask.at<uchar>(y, x) > 0) {
-                    cv::Vec3d px = rgb_float.at<cv::Vec3d>(y, x);
+        for (int y = 0; y < bbox.height; ++y) {
+            const uchar* mask_row = mask.ptr<uchar>(y);
+            const cv::Vec3d* img_row = rgb_float.ptr<cv::Vec3d>(bbox.y + y) + bbox.x;
+            for (int x = 0; x < bbox.width; ++x) {
+                if (mask_row[x] > 0) {
+                    const cv::Vec3d& px = img_row[x];
                     if (px[0] > lower_threshold && px[0] < upper_threshold &&
                         px[1] > lower_threshold && px[1] < upper_threshold &&
                         px[2] > lower_threshold && px[2] < upper_threshold) {
