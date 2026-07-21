@@ -168,6 +168,10 @@ cmake -B build -DCHROMACAL_BUILD_PYTHON=ON
 cmake --build build
 ```
 
+See [`docs/DEV_SETUP.md`](docs/DEV_SETUP.md) for the full local dev
+environment setup (dependency versions, a prebuilt-dependency fast path for
+Linux, and how to build/run the test suite).
+
 ## API
 
 ### `detect(image, exposure=1.0)`
