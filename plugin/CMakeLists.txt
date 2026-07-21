@@ -45,6 +45,17 @@ if(CHROMACAL_BUILD_TESTS)
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tests/cube_parity.sh
                 $<TARGET_FILE_DIR:chromacal_solve>
                 ${CMAKE_CURRENT_SOURCE_DIR}/../docs/before.png 0.02)
+
+    # Unit tests for solve_core's file/format helpers (calibration presets,
+    # reference-Lab parsing, .cube baking, image diffing) — the pieces that
+    # don't require a real ColorChecker frame, so they run fast and don't
+    # depend on the smoke test's detection succeeding.
+    add_executable(chromacal_ppro_tests tests/test_solve_core.cpp)
+    target_link_libraries(chromacal_ppro_tests PRIVATE chromacal_ppro_core Catch2::Catch2WithMain)
+    target_compile_definitions(chromacal_ppro_tests PRIVATE
+        CHROMACAL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
+    include(Catch)
+    catch_discover_tests(chromacal_ppro_tests)
 endif()
 
 # --- Native Premiere/AE video effect (optional) ----------------------------
