@@ -158,6 +158,7 @@ TEST_CASE("write_effect_cube writes a well-formed .cube file", "[solve_format]")
     }
     CHECK(saw_size);
     CHECK(data_lines == N * N * N);
+    in.close();  // Windows won't remove a file with an open handle.
     std::filesystem::remove(path);
 }
 
