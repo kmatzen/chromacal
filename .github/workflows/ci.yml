@@ -65,9 +65,38 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$PREFIX" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$PREFIX/lib:$PREFIX/lib64:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
 
+      - name: Cache macOS OpenCV (from source, 4.13.0)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ~/cv-lean
+          key: macos-opencv-4.13.0-mcc-v1
+
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install eigen ceres-solver opencolorio opencv
+        # Homebrew's opencv has moved to 5.x, which is incompatible with the
+        # find_package(OpenCV 4.0) pin — and cv::mcc's API was reorganized in
+        # OpenCV 5. Build OpenCV 4.13.0 from source (mcc+imgcodecs), matching
+        # the Linux job and build-effect-macos; keep eigen/ceres/ocio from brew.
+        run: |
+          set -e
+          brew install eigen ceres-solver opencolorio
+          PREFIX="$HOME/cv-lean"
+          if [ ! -e "$PREFIX/.complete" ]; then
+            git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv.git /tmp/opencv
+            git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv_contrib.git /tmp/opencv_contrib
+            cmake -S /tmp/opencv -B /tmp/opencv/build -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+              -DOPENCV_EXTRA_MODULES_PATH=/tmp/opencv_contrib/modules \
+              -DBUILD_LIST=mcc,imgcodecs \
+              -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+              -DBUILD_opencv_apps=OFF -DBUILD_DOCS=OFF \
+              -DWITH_FFMPEG=OFF -DWITH_GSTREAMER=OFF -DWITH_TBB=OFF
+            cmake --build /tmp/opencv/build -j"$(sysctl -n hw.ncpu)" && cmake --install /tmp/opencv/build
+            touch "$PREFIX/.complete"
+          fi
+          echo "CMAKE_PREFIX_PATH=$PREFIX" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=$PREFIX/lib:$DYLD_LIBRARY_PATH" >> "$GITHUB_ENV"
 
       - name: Configure
         # BUILD_PPRO builds the plugin core + CLIs and registers the plugin CTests

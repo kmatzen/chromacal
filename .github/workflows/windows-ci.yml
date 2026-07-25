@@ -26,7 +26,10 @@ defaults:
 
 jobs:
   build-and-test:
-    runs-on: windows-latest
+    # Pinned: windows-latest moved to the VS2026 image, but the CMake
+    # generator below hardcodes "Visual Studio 17 2022". Pin the runner so
+    # the two stay in sync (bump both together when moving to VS2026).
+    runs-on: windows-2022
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg_cache
     steps:
@@ -73,7 +76,10 @@ jobs:
   build-effect:
     name: Build chromacal.aex (effect)
     needs: build-and-test          # run after the core job so the vcpkg cache is warm
-    runs-on: windows-latest
+    # Pinned: windows-latest moved to the VS2026 image, but the CMake
+    # generator below hardcodes "Visual Studio 17 2022". Pin the runner so
+    # the two stay in sync (bump both together when moving to VS2026).
+    runs-on: windows-2022
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg_cache
     steps:
