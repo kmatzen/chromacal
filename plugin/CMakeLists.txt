@@ -4,7 +4,7 @@
 # Enabled from the top-level build with -DCHROMACAL_BUILD_PPRO=ON.
 
 # --- SDK-free core ----------------------------------------------------------
-add_library(chromacal_ppro_core STATIC native/solve_core.cpp)
+add_library(chromacal_ppro_core STATIC native/solve_core.cpp native/solve_format.cpp)
 target_include_directories(chromacal_ppro_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/native)
 target_link_libraries(chromacal_ppro_core PUBLIC chromacal)
 set_target_properties(chromacal_ppro_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -45,6 +45,27 @@ if(CHROMACAL_BUILD_TESTS)
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tests/cube_parity.sh
                 $<TARGET_FILE_DIR:chromacal_solve>
                 ${CMAKE_CURRENT_SOURCE_DIR}/../docs/before.png 0.02)
+
+    # Unit tests for solve_format's calibration-preset / .cube-format helpers.
+    # solve_format.{h,cpp} has zero OpenCV/Ceres/OpenColorIO dependency, so
+    # this target links only the standard library + Catch2 — it builds and
+    # runs anywhere a bare C++17 compiler is available, no native image/
+    # optimization stack required (unlike chromacal_ppro_tests below).
+    add_executable(chromacal_ppro_format_tests tests/test_solve_format.cpp native/solve_format.cpp)
+    target_include_directories(chromacal_ppro_format_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/native)
+    target_link_libraries(chromacal_ppro_format_tests PRIVATE Catch2::Catch2WithMain)
+    include(Catch)
+    catch_discover_tests(chromacal_ppro_format_tests)
+
+    # Unit tests for solve_core's detect+solve entry points (still need the
+    # full OpenCV/chromacal stack via chromacal_ppro_core) — error paths and
+    # the parts that don't require a real ColorChecker frame to detect, so
+    # they run fast and don't depend on the smoke test's detection succeeding.
+    add_executable(chromacal_ppro_tests tests/test_solve_core.cpp)
+    target_link_libraries(chromacal_ppro_tests PRIVATE chromacal_ppro_core Catch2::Catch2WithMain)
+    target_compile_definitions(chromacal_ppro_tests PRIVATE
+        CHROMACAL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
+    catch_discover_tests(chromacal_ppro_tests)
 endif()
 
 # --- Native Premiere/AE video effect (optional) ----------------------------
