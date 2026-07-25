@@ -1,0 +1,69 @@
+name: Publish prebuilt dev deps
+
+# Builds chromacal's from-source Linux native dependencies (Ceres,
+# OpenColorIO, OpenCV+contrib with mcc — see scripts/build_linux_devdeps.sh)
+# once, and publishes the result as a downloadable Release asset.
+#
+# This exists so that anywhere OTHER than a GitHub Actions runner — a
+# contributor's machine, a container, an ephemeral cloud/agent dev session —
+# doesn't have to pay the ~20 minute from-source build ci.yml pays on every
+# cache miss. `curl`+`tar` the asset into CMAKE_PREFIX_PATH instead; see
+# docs/DEV_SETUP.md.
+#
+# Runs when the dependency build script or its pinned versions change, and
+# on demand. Publishes to a single rolling Release (tag: devdeps-linux) so
+# there's always one stable download URL; the asset filename embeds the
+# pinned versions so consumers can tell what they got.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - scripts/build_linux_devdeps.sh
+      - .github/workflows/publish-devdeps.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y cmake libeigen3-dev libgoogle-glog-dev libgflags-dev \
+            libsuitesparse-dev libpng-dev libjpeg-dev libtiff-dev zlib1g-dev
+
+      - name: Build dependency prefix
+        run: ./scripts/build_linux_devdeps.sh "$HOME/cvdeps"
+
+      - name: Package
+        id: pkg
+        run: |
+          set -e
+          NAME="chromacal-devdeps-linux-x86_64-ceres2.2.0-ocio2.5.1-opencv4.13.0.tar.gz"
+          tar -C "$HOME" -czf "$RUNNER_TEMP/$NAME" cvdeps
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "path=$RUNNER_TEMP/$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="devdeps-linux"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${{ steps.pkg.outputs.path }}" \
+              --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "$TAG" "${{ steps.pkg.outputs.path }}" \
+              --repo "${{ github.repository }}" \
+              --title "Prebuilt Linux dev dependencies" \
+              --notes "Prebuilt Ceres/OpenColorIO/OpenCV(+mcc) install prefix for local/cloud dev builds of chromacal. Rebuilt automatically when scripts/build_linux_devdeps.sh changes. Extract to \$HOME/cvdeps and set CMAKE_PREFIX_PATH accordingly — see docs/DEV_SETUP.md." \
+              --latest=false
+          fi

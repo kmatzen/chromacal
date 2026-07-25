@@ -90,15 +90,11 @@ if(CHROMACAL_BUILD_EXAMPLES)
 endif()
 
 # ------------------------------------------------------------------------------
-# Premiere Pro plugin
-# ------------------------------------------------------------------------------
-if(CHROMACAL_BUILD_PPRO)
-    add_subdirectory(plugin)
-endif()
-
-# ------------------------------------------------------------------------------
 # Tests
 # ------------------------------------------------------------------------------
+# Fetched before the Premiere Pro plugin subdirectory below so that
+# Catch2::Catch2WithMain is available to plugin/CMakeLists.txt's own test
+# executable (chromacal_ppro_tests).
 if(CHROMACAL_BUILD_TESTS)
     enable_testing()
 
@@ -130,6 +126,13 @@ if(CHROMACAL_BUILD_TESTS)
     include(CTest)
     include(Catch)
     catch_discover_tests(chromacal_tests)
+endif()
+
+# ------------------------------------------------------------------------------
+# Premiere Pro plugin
+# ------------------------------------------------------------------------------
+if(CHROMACAL_BUILD_PPRO)
+    add_subdirectory(plugin)
 endif()
 
 # ------------------------------------------------------------------------------
