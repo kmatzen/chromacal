@@ -28,8 +28,13 @@ class Solver {
     ///
     /// @param patches  Patch statistics from detect() or filter_normal().
     ///                 Must contain at least one patch.
+    /// @param verbose  Print the Ceres per-iteration progress and full solver
+    ///                 report to stdout. Off by default -- library code
+    ///                 shouldn't write to stdout unasked, and this runs on
+    ///                 the render thread when called from the Premiere/AE
+    ///                 effect. Use get_report() for the summary instead.
     /// @throws std::invalid_argument if patches is empty.
-    void solve(const std::vector<PatchStatistics>& patches);
+    void solve(const std::vector<PatchStatistics>& patches, bool verbose = false);
 
     /// Apply the calibration to an image.
     ///
@@ -48,6 +53,17 @@ class Solver {
 
     /// Get the final optimization cost.
     double get_final_error() const;
+
+    /// Get a brief human-readable summary of the last solve() (iteration
+    /// count, termination reason, initial/final cost) -- the useful part of
+    /// what `verbose` would otherwise print, without the per-iteration noise.
+    std::string get_report() const;
+
+    /// Whether the last solve() converged to a usable solution (Ceres'
+    /// `Summary::IsSolutionUsable()`). False indicates the fit likely
+    /// diverged or failed even though get_final_error() still returns a
+    /// number -- check this before trusting a calibration.
+    bool converged() const;
 
     /// Save calibration to a YAML file.
     void save(const std::string& filename) const;

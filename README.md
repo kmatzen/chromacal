@@ -170,12 +170,23 @@ cmake --build build
 
 ## API
 
-### `detect(image, exposure=1.0)`
+### `detect(image, exposure=1.0, lower_threshold=0.01, upper_threshold=0.99, chart=ChartType.Classic24, reference_lab=None)`
 
-Detect a ColorChecker in a BGR image and return patch statistics. Each returned
-patch carries a `reliability` weight in (0, 1]; `Solver.solve` uses it to
-down-weight contaminated patches automatically, so no explicit filtering step
-is required.
+Detect a ColorChecker in a BGR (`uint8`) image and return patch statistics.
+Each returned patch carries a `reliability` weight in (0, 1]; `Solver.solve`
+uses it to down-weight contaminated patches automatically, so no explicit
+filtering step is required.
+
+`chart` selects `ChartType.Classic24` (default, built-in 24-patch reference)
+or `ChartType.SG140`, which requires `reference_lab` — an `(N, 3)` array of D50
+Lab values in patch order, since X-Rite's SG reference data is licensed and
+not bundled.
+
+Each `PatchStatistics` also exposes `covariance` (3x3 numpy array) and
+`center` (normalized `[x, y]` patch center), and `NormalityTestResults`
+exposes the underlying p-values (`mardia_skewness_pvalue`,
+`mardia_kurtosis_pvalue`, `henze_zirkler_pvalue`, `shapiro_pvalues`) alongside
+the pass/fail booleans.
 
 ### `filter_normal(patches)` *(optional)*
 

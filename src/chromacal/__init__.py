@@ -19,7 +19,7 @@ Usage::
     corrected = chromacal.apply_lut(image, lut)
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from _chromacal import (
     LUT,
