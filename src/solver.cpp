@@ -1,6 +1,7 @@
 #include "chromacal/solver.h"
 
 #include <ceres/ceres.h>
+#include <cmath>
 #include <iostream>
 
 namespace chromacal {
@@ -149,7 +150,7 @@ Solver::~Solver() = default;
 Solver::Solver(Solver&&) noexcept = default;
 Solver& Solver::operator=(Solver&&) noexcept = default;
 
-void Solver::solve(const std::vector<PatchStatistics>& patches) {
+void Solver::solve(const std::vector<PatchStatistics>& patches, bool verbose) {
     if (patches.empty())
         throw std::invalid_argument("Patch statistics vector is empty.");
 
@@ -162,7 +163,17 @@ void Solver::solve(const std::vector<PatchStatistics>& patches) {
 
     ceres::Problem problem;
 
-    size_t idx = 0;
+    // Neutral (grayscale) patches get an extra white-balance residual pinning
+    // R=G=B. Identified by reference chroma rather than position in `patches`:
+    // detect() can drop a patch for insufficient valid pixels, filter_normal()
+    // (a documented pre-solve step) can remove patches, and SG140 doesn't share
+    // the Classic chart's layout at all -- so a fixed index (e.g. "patches
+    // 18-23 of every 24") silently drifts onto chromatic patches under any of
+    // those. Reference chroma has a large margin here: the Classic chart's
+    // grayscale row tops out at chroma ~1.3, while its most neutral chromatic
+    // patch is ~19.5.
+    const double kNeutralChromaThreshold = 5.0;
+
     for (const auto& p : patches) {
         // Down-weight unreliable patches (contaminated by specular highlights,
         // occlusions, etc.) by scaling the loss by reliability^2 -- equivalent
@@ -178,14 +189,13 @@ void Solver::solve(const std::vector<PatchStatistics>& patches) {
                 new ColorCalibrationCost(p.mean, p.covariance, p.reference_lab, p.exposure, ref_exp)),
             loss, luma.data(), ccm);
 
-        int patch_id = idx % 24;
-        if (patch_id >= 18 && patch_id <= 23) {
+        double chroma = std::hypot(p.reference_lab[1], p.reference_lab[2]);
+        if (chroma < kNeutralChromaThreshold) {
             problem.AddResidualBlock(
                 new ceres::AutoDiffCostFunction<WhiteBalanceCost, 2, 4, 9>(
                     new WhiteBalanceCost(p.mean, p.exposure, ref_exp)),
                 new ceres::ScaledLoss(nullptr, 0.1 * rw2, ceres::TAKE_OWNERSHIP), luma.data(), ccm);
         }
-        ++idx;
     }
 
     // Bounds on CCM
@@ -201,7 +211,7 @@ void Solver::solve(const std::vector<PatchStatistics>& patches) {
 
     ceres::Solver::Options options;
     options.linear_solver_type = ceres::DENSE_QR;
-    options.minimizer_progress_to_stdout = true;
+    options.minimizer_progress_to_stdout = verbose;
     options.max_num_iterations = 100;
     options.function_tolerance = 1e-8;
     options.gradient_tolerance = 1e-10;
@@ -209,12 +219,14 @@ void Solver::solve(const std::vector<PatchStatistics>& patches) {
 
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
-    std::cout << summary.FullReport() << std::endl;
+    if (verbose) std::cout << summary.FullReport() << std::endl;
 
     result_ = std::make_unique<CalibrationResult>();
     result_->luma_params = luma;
     result_->color_matrix = cv::Mat(3, 3, CV_64F, ccm).clone();
     result_->final_error = summary.final_cost;
+    result_->report = summary.BriefReport();
+    result_->converged = summary.IsSolutionUsable();
     result_->reference_exposure = ref_exp;
 }
 
@@ -225,25 +237,35 @@ cv::Mat Solver::infer(const cv::Mat& image) const {
 
     cv::Mat out(image.size(), CV_64FC3);
     const auto& lp = result_->luma_params;
-    const auto& cm = result_->color_matrix;
+    const double l0 = lp[0], l1 = lp[1], l2 = lp[2], l3 = lp[3];
+    // Hoist the CCM into locals: this is the inner loop behind both LUT-baking
+    // paths (write_cube / create_lut sample it per grid cell), and 9 bounds-
+    // checked cv::Mat::at<double>() lookups per pixel were pure overhead over a
+    // 3x3 that never changes during the loop.
+    const cv::Mat& cm = result_->color_matrix;
+    const double m00 = cm.at<double>(0,0), m01 = cm.at<double>(0,1), m02 = cm.at<double>(0,2);
+    const double m10 = cm.at<double>(1,0), m11 = cm.at<double>(1,1), m12 = cm.at<double>(1,2);
+    const double m20 = cm.at<double>(2,0), m21 = cm.at<double>(2,1), m22 = cm.at<double>(2,2);
 
     for (int y = 0; y < image.rows; ++y) {
+        const cv::Vec3d* in_row = image.ptr<cv::Vec3d>(y);
+        cv::Vec3d* out_row = out.ptr<cv::Vec3d>(y);
         for (int x = 0; x < image.cols; ++x) {
-            cv::Vec3d in = image.at<cv::Vec3d>(y, x);
+            const cv::Vec3d& in = in_row[x];
 
             double log_r = std::log(in[0] + 1e-6);
             double log_g = std::log(in[1] + 1e-6);
             double log_b = std::log(in[2] + 1e-6);
 
-            double ar = std::exp(lp[0] + lp[1]*log_r + lp[2]*log_r*log_r + lp[3]*log_r*log_r*log_r);
-            double ag = std::exp(lp[0] + lp[1]*log_g + lp[2]*log_g*log_g + lp[3]*log_g*log_g*log_g);
-            double ab = std::exp(lp[0] + lp[1]*log_b + lp[2]*log_b*log_b + lp[3]*log_b*log_b*log_b);
+            double ar = std::exp(l0 + l1*log_r + l2*log_r*log_r + l3*log_r*log_r*log_r);
+            double ag = std::exp(l0 + l1*log_g + l2*log_g*log_g + l3*log_g*log_g*log_g);
+            double ab = std::exp(l0 + l1*log_b + l2*log_b*log_b + l3*log_b*log_b*log_b);
 
-            double r = cm.at<double>(0,0)*ar + cm.at<double>(0,1)*ag + cm.at<double>(0,2)*ab;
-            double g = cm.at<double>(1,0)*ar + cm.at<double>(1,1)*ag + cm.at<double>(1,2)*ab;
-            double b = cm.at<double>(2,0)*ar + cm.at<double>(2,1)*ag + cm.at<double>(2,2)*ab;
+            double r = m00*ar + m01*ag + m02*ab;
+            double g = m10*ar + m11*ag + m12*ab;
+            double b = m20*ar + m21*ag + m22*ab;
 
-            out.at<cv::Vec3d>(y, x) = cv::Vec3d(r, g, b);
+            out_row[x] = cv::Vec3d(r, g, b);
         }
     }
     return out;
@@ -269,9 +291,20 @@ double Solver::get_final_error() const {
     return result_->final_error;
 }
 
+std::string Solver::get_report() const {
+    if (!result_) throw std::runtime_error("No calibration loaded.");
+    return result_->report;
+}
+
+bool Solver::converged() const {
+    if (!result_) throw std::runtime_error("No calibration loaded.");
+    return result_->converged;
+}
+
 void Solver::save(const std::string& filename) const {
     if (!result_) throw std::runtime_error("No calibration to save.");
     cv::FileStorage fs(filename, cv::FileStorage::WRITE);
+    if (!fs.isOpened()) throw std::runtime_error("Cannot open for writing: " + filename);
     fs << "luma_params" << result_->luma_params;
     fs << "color_matrix" << result_->color_matrix;
     fs << "final_error" << result_->final_error;

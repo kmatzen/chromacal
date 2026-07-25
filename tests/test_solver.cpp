@@ -64,6 +64,8 @@ TEST_CASE("Solver throws when no calibration loaded", "[solver]") {
     CHECK_THROWS(solver.get_luma_params());
     CHECK_THROWS(solver.get_reference_exposure());
     CHECK_THROWS(solver.get_final_error());
+    CHECK_THROWS(solver.get_report());
+    CHECK_THROWS(solver.converged());
 
     cv::Mat img(1, 1, CV_64FC3, cv::Scalar(0.5, 0.5, 0.5));
     CHECK_THROWS(solver.infer(img));
@@ -86,6 +88,18 @@ TEST_CASE("Solver fits synthetic data", "[solver]") {
 
     CHECK(solver.get_reference_exposure() > 0.0);
     CHECK(solver.get_final_error() >= 0.0);
+    CHECK(solver.converged());
+    CHECK_FALSE(solver.get_report().empty());
+}
+
+TEST_CASE("Solver solve() defaults to quiet (verbose=false)", "[solver]") {
+    // Regression test for the Ceres progress/report dump that used to print
+    // unconditionally: solve() with the default argument must not require a
+    // second parameter, and must still produce a usable result.
+    auto patches = make_synthetic_patches();
+    Solver solver;
+    solver.solve(patches); // one-arg call must still compile and work
+    CHECK(solver.converged());
 }
 
 TEST_CASE("Solver CCM diagonal elements are positive", "[solver]") {

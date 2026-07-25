@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Never cancel a tag-triggered release build; branch/PR runs are safe to
+  # supersede when a new commit lands before the previous run finishes.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   build-wheels:
     name: ${{ matrix.os }} wheels
