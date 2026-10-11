@@ -8,6 +8,9 @@ namespace py = pybind11;
 
 // Convert numpy (H, W, 3) uint8 BGR array to cv::Mat
 static cv::Mat numpy_to_mat_bgr(py::array_t<uint8_t> arr) {
+    if (!arr.is_c_contiguous())
+        throw std::runtime_error("Input array must be C-contiguous (use np.ascontiguousarray()); "
+                                 "non-contiguous arrays would be misread by cv::Mat");
     auto buf = arr.request();
     if (buf.ndim != 3 || buf.shape[2] != 3)
         throw std::runtime_error("Expected (H, W, 3) uint8 array");
@@ -16,6 +19,9 @@ static cv::Mat numpy_to_mat_bgr(py::array_t<uint8_t> arr) {
 
 // Convert numpy (H, W, 3) float64 RGB array to cv::Mat CV_64FC3
 static cv::Mat numpy_to_mat_f64(py::array_t<double> arr) {
+    if (!arr.is_c_contiguous())
+        throw std::runtime_error("Input array must be C-contiguous (use np.ascontiguousarray()); "
+                                 "non-contiguous arrays would be misread by cv::Mat");
     auto buf = arr.request();
     if (buf.ndim != 3 || buf.shape[2] != 3)
         throw std::runtime_error("Expected (H, W, 3) float64 array");

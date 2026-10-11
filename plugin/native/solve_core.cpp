@@ -54,6 +54,10 @@ static SolveResult run_solve(const cv::Mat& image, const std::string* cube_path,
         r.min_reliability = std::min(r.min_reliability, p.reliability);
 
     // Patch centers (normalized) for the effect's detection overlay.
+    // NOTE: the overlay buffer (SolveResult::overlay_xy) is sized for exactly
+    // 24 centers (48 floats), the Classic chart's patch count. On SG140 the
+    // 25th and later patch centers are silently dropped -- the overlay is a
+    // visual aid only, the solve itself uses all detected patches.
     for (const auto& p : patches) {
         if (r.overlay_count >= 24 || p.center[0] < 0) continue;
         r.overlay_xy[r.overlay_count * 2] = static_cast<float>(p.center[0]);
@@ -84,7 +88,12 @@ static SolveResult run_solve(const cv::Mat& image, const std::string* cube_path,
         r.luma[i] = luma[i];
 
     r.final_error = solver.get_final_error();
-    r.ok = true;
+    // ok reflects an actual converged solve, not just "no exception thrown":
+    // solve() can finish with a non-converged (unusable) solution and still
+    // return normally.
+    r.ok = solver.converged();
+    if (!r.ok && r.error.empty())
+        r.error = "Solver did not converge to a usable solution.";
     return r;
 }
 
