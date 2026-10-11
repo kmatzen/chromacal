@@ -426,7 +426,18 @@ std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure,
         // zero-fill repeated per patch (24-140x per detect() call). Intersecting
         // with the image rect also clamps a quad that pokes outside the frame,
         // which the old min/max-based clamp didn't do for boundingRect() itself.
-        cv::Rect bbox = cv::boundingRect(corners) & cv::Rect(0, 0, rgb_float.cols, rgb_float.rows);
+        // OpenCV 5.0 removed the free-function cv::boundingRect(); compute the
+        // bounding rect manually so this compiles against 4.x and 5.x alike.
+        int bminX = corners[0].x, bmaxX = corners[0].x;
+        int bminY = corners[0].y, bmaxY = corners[0].y;
+        for (const auto& c : corners) {
+            bminX = std::min(bminX, c.x);
+            bmaxX = std::max(bmaxX, c.x);
+            bminY = std::min(bminY, c.y);
+            bmaxY = std::max(bmaxY, c.y);
+        }
+        cv::Rect bbox = cv::Rect(bminX, bminY, bmaxX - bminX, bmaxY - bminY) &
+                        cv::Rect(0, 0, rgb_float.cols, rgb_float.rows);
         if (bbox.width <= 0 || bbox.height <= 0) continue;
 
         cv::Mat mask = cv::Mat::zeros(bbox.size(), CV_8UC1);

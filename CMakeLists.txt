@@ -12,16 +12,62 @@ option(CHROMACAL_BUILD_EXAMPLES "Build examples" OFF)
 option(CHROMACAL_BUILD_TESTS "Build tests" OFF)
 option(CHROMACAL_BUILD_PPRO "Build the Premiere Pro plugin (native core + CLI)" OFF)
 
+# Optional explicit override for the AppleClang/OpenMP fallback below.
+set(CHROMACAL_LIBOMP_INCLUDE "" CACHE PATH "Explicit libomp include dir (fallback when find_package(OpenMP) fails)")
+set(CHROMACAL_LIBOMP "" CACHE FILEPATH "Explicit libomp library (fallback when find_package(OpenMP) fails)")
+
 # ------------------------------------------------------------------------------
 # Dependencies
 # ------------------------------------------------------------------------------
-find_package(OpenCV 4.0 REQUIRED)
+# Deliberately unversioned. OpenCV's config treats major versions as
+# incompatible, so find_package(OpenCV 4.0) rejects 5.x outright -- which is
+# what broke macOS builds when Homebrew moved the opencv formula to 5.0. The
+# floor is enforced below instead.
+find_package(OpenCV REQUIRED)
+
+if(OpenCV_VERSION VERSION_LESS 4.0)
+    message(FATAL_ERROR
+        "chromacal requires OpenCV 4.0 or newer, found ${OpenCV_VERSION}")
+endif()
 find_package(Ceres REQUIRED)
 find_package(OpenColorIO REQUIRED)
 find_package(Eigen3 REQUIRED)
 
-# OpenMP (optional)
-find_package(OpenMP)
+# OpenMP (optional) -- resolved per-target below, after add_library().
+#
+# AppleClang (bundled LLVM, no -fopenmp of its own) only supports OpenMP via
+# Apple's libomp, and CMake's OpenMP module is flaky about finding it -- it
+# sometimes reports OpenMP_CXX_FOUND with -Xclang -fopenmp but no libomp on the
+# include path, so <omp.h> (pulled in by Eigen when EIGEN_DONT_INCLUDE_PTHREAD
+# is absent) fails to resolve. The brew libomp keg is not even symlinked into
+# /opt/homebrew/lib. So on AppleClang skip the module entirely and wire libomp
+# up manually -- that is all this project's OpenMP is used for (-fopenmp plus
+# the libomp include + library).
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    find_path(_chromacal_libomp_include
+        NAMES omp.h
+        HINTS ${CHROMACAL_LIBOMP_INCLUDE}
+        PATH_SUFFIXES libomp/include libomp
+    )
+    find_library(_chromacal_libomp HINTS ${CHROMACAL_LIBOMP} NAME_SUFFIXES .dylib .a NAMES omp)
+    if(NOT _chromacal_libomp)
+        file(GLOB _chromacal_libomp_kegs /opt/homebrew/Cellar/libomp/*/lib/libomp.dylib)
+        if(_chromacal_libomp_kegs)
+            list(GET _chromacal_libomp_kegs 0 _chromacal_libomp)
+        endif()
+    endif()
+    if(NOT _chromacal_libomp_include)
+        file(GLOB _chromacal_libomp_inc_kegs /opt/homebrew/Cellar/libomp/*/include)
+        if(_chromacal_libomp_inc_kegs)
+            list(GET _chromacal_libomp_inc_kegs 0 _chromacal_libomp_include)
+        endif()
+    endif()
+    if(NOT _chromacal_libomp_include OR NOT _chromacal_libomp)
+        message(WARNING "chromacal: libomp not found; #pragma omp parallel for will be serial")
+    endif()
+elseif(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    find_package(OpenMP)
+endif()
 
 # ------------------------------------------------------------------------------
 # Library
@@ -47,6 +93,20 @@ target_include_directories(chromacal
         $<INSTALL_INTERFACE:include>
 )
 
+# OpenMP wiring (deferred until the target exists -- the AppleClang manual
+# fallback runs after add_library()).
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    if(_chromacal_libomp_include AND _chromacal_libomp)
+        message(STATUS "chromacal: manual OpenMP (libomp at ${_chromacal_libomp})")
+        target_compile_options(chromacal PRIVATE -Xpreprocessor -fopenmp -I${_chromacal_libomp_include})
+        # INTERFACE (not PRIVATE) so downstream targets that link chromacal
+        # (examples, tests, consumers) also get the libomp link.
+        target_link_options(chromacal INTERFACE ${_chromacal_libomp})
+    endif()
+elseif(OpenMP_CXX_FOUND)
+    target_link_libraries(chromacal PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
 target_link_libraries(chromacal
     PUBLIC
         ${OpenCV_LIBS}
@@ -54,10 +114,6 @@ target_link_libraries(chromacal
         OpenColorIO::OpenColorIO
         Eigen3::Eigen
 )
-
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(chromacal PRIVATE OpenMP::OpenMP_CXX)
-endif()
 
 set_target_properties(chromacal PROPERTIES
     VERSION ${PROJECT_VERSION}
