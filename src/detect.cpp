@@ -150,7 +150,7 @@ double mardia_skewness_test(const std::vector<cv::Vec3d>& pixels, const cv::Vec3
     if (n < 4) return 0.0;
 
     cv::Matx33d cov_inv;
-    cv::invert(covariance, cov_inv);
+    if (cv::invert(covariance, cov_inv) == 0) return 0.0; // singular covariance -> skip test
 
     double b1p = 0.0;
     for (int i = 0; i < n; ++i) {
@@ -177,7 +177,7 @@ double mardia_kurtosis_test(const std::vector<cv::Vec3d>& pixels, const cv::Vec3
     if (n < 4) return 0.0;
 
     cv::Matx33d cov_inv;
-    cv::invert(covariance, cov_inv);
+    if (cv::invert(covariance, cov_inv) == 0) return 0.0; // singular covariance -> skip test
 
     double b2p = 0.0;
     for (int i = 0; i < n; ++i) {

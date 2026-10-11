@@ -10,6 +10,9 @@
 namespace chromacal {
 
 OCIO::ConstCPUProcessorRcPtr create_lut(const Solver& solver, int lut_size) {
+    if (lut_size < 2)
+        throw std::invalid_argument("LUT size must be >= 2, got " + std::to_string(lut_size) +
+                                    ": a grid needs at least two levels per axis");
     auto lut = OCIO::Lut3DTransform::Create();
     lut->setGridSize(lut_size);
     lut->setInterpolation(OCIO::INTERP_LINEAR);

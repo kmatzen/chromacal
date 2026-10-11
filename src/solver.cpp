@@ -25,15 +25,6 @@ struct ColorCalibrationCost {
         sqrt_inv_cov = U * D_inv_sqrt * U.t();
     }
 
-    template <typename T> static T lab_f(const T& t) {
-        T delta = T(6.0 / 29.0);
-        T threshold = delta * delta * delta;
-        T linear = t / (T(3.0) * delta * delta) + T(4.0 / 29.0);
-        T cubic = ceres::pow(t, T(1.0 / 3.0));
-        T blend = (ceres::tanh((t - threshold) * T(100.0)) + T(1.0)) * T(0.5);
-        return blend * cubic + (T(1.0) - blend) * linear;
-    }
-
     template <typename T> static T lab_finv(const T& t) {
         T delta = T(6.0 / 29.0);
         T cubic = t * t * t;
@@ -163,6 +154,12 @@ void Solver::solve(const std::vector<PatchStatistics>& patches, bool verbose) {
 
     ceres::Problem problem;
 
+    for (const auto& p : patches)
+        if (p.exposure <= 0.0)
+            throw std::invalid_argument("Patch exposure must be positive (got <= 0): the "
+                                        "exposure normalization divides by it, so a zero "
+                                        "exposure would produce divide-by-zero residuals.");
+
     // Neutral (grayscale) patches get an extra white-balance residual pinning
     // R=G=B. Identified by reference chroma rather than position in `patches`:
     // detect() can drop a patch for insufficient valid pixels, filter_normal()
@@ -179,10 +176,10 @@ void Solver::solve(const std::vector<PatchStatistics>& patches, bool verbose) {
         // occlusions, etc.) by scaling the loss by reliability^2 -- equivalent
         // to scaling the residual by the reliability. reliability == 1 leaves
         // the plain Huber loss untouched, so clean patches are unaffected.
-        double rw2 = p.reliability * p.reliability;
+        double rw = p.reliability;
         ceres::LossFunction* loss = new ceres::HuberLoss(3.0);
         if (p.reliability < 1.0)
-            loss = new ceres::ScaledLoss(loss, rw2, ceres::TAKE_OWNERSHIP);
+            loss = new ceres::ScaledLoss(loss, rw, ceres::TAKE_OWNERSHIP);
 
         problem.AddResidualBlock(
             new ceres::AutoDiffCostFunction<ColorCalibrationCost, 3, 4, 9>(
@@ -194,7 +191,7 @@ void Solver::solve(const std::vector<PatchStatistics>& patches, bool verbose) {
             problem.AddResidualBlock(
                 new ceres::AutoDiffCostFunction<WhiteBalanceCost, 2, 4, 9>(
                     new WhiteBalanceCost(p.mean, p.exposure, ref_exp)),
-                new ceres::ScaledLoss(nullptr, 0.1 * rw2, ceres::TAKE_OWNERSHIP), luma.data(), ccm);
+                new ceres::ScaledLoss(nullptr, 0.1 * rw, ceres::TAKE_OWNERSHIP), luma.data(), ccm);
         }
     }
 
@@ -314,9 +311,26 @@ void Solver::save(const std::string& filename) const {
 void Solver::load(const std::string& filename) {
     cv::FileStorage fs(filename, cv::FileStorage::READ);
     if (!fs.isOpened()) throw std::runtime_error("Cannot open: " + filename);
+    auto luma_params = std::vector<double>();
+    fs["luma_params"] >> luma_params;
+    if (luma_params.size() != 4)
+        throw std::runtime_error("Invalid calibration file " + filename +
+                                 ": luma_params must have 4 entries, got " +
+                                 std::to_string(luma_params.size()));
+    cv::Mat color_matrix;
+    fs["color_matrix"] >> color_matrix;
+    if (color_matrix.empty() || color_matrix.type() != CV_64FC3 ||
+        color_matrix.rows != 3 || color_matrix.cols != 3)
+        throw std::runtime_error("Invalid calibration file " + filename +
+                                 ": color_matrix must be a 3x3 CV_64F matrix");
+    if (fs["final_error"].type() != cv::FileNode::REAL ||
+        fs["reference_exposure"].type() != cv::FileNode::REAL)
+        throw std::runtime_error("Invalid calibration file " + filename +
+                                 ": missing final_error or reference_exposure");
+
     result_ = std::make_unique<CalibrationResult>();
-    fs["luma_params"] >> result_->luma_params;
-    fs["color_matrix"] >> result_->color_matrix;
+    result_->luma_params = luma_params;
+    result_->color_matrix = color_matrix.clone();
     fs["final_error"] >> result_->final_error;
     fs["reference_exposure"] >> result_->reference_exposure;
 }

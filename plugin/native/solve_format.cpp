@@ -33,6 +33,11 @@ double srgb_decode(double c) {
 bool write_display_cube(const double* luma, const double* ccm,
                         const std::string& path, int lut_size, double gamma) {
     if (lut_size < 2 || !luma || !ccm) return false;
+    // The input grid is decoded with pow(x, 1/gamma); gamma <= 0 divides by
+    // zero (or gives a meaningless 1/0 power) and would emit a degenerate LUT.
+    // gamma <= 0 is the "sRGB OETF" mode for write_effect_cube only -- the
+    // sRGB-managed display bake always needs a working-space gamma > 0.
+    if (!(gamma > 0.0)) return false;
     try {
         std::filesystem::path p(path);
         if (p.has_parent_path()) std::filesystem::create_directories(p.parent_path());
