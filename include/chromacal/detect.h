@@ -2,7 +2,15 @@
 
 #include "chromacal/types.h"
 
-#include <opencv2/mcc.hpp>
+// OpenCV version note: OpenCV 5.x removed the top-level <opencv2/mcc.hpp> and
+// moved the CCM enum + checker classes to objdetect/mcc_checker_detector.hpp.
+#if __has_include(<opencv2/mcc.hpp>)
+#    include <opencv2/mcc.hpp>
+#elif __has_include(<opencv2/objdetect/mcc_checker_detector.hpp>)
+#    include <opencv2/objdetect/mcc_checker_detector.hpp>
+#else
+#    include <opencv2/opencv.hpp>
+#endif
 #include <opencv2/opencv.hpp>
 #include <vector>
 
