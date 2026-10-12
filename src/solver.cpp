@@ -319,10 +319,10 @@ void Solver::load(const std::string& filename) {
                                  std::to_string(luma_params.size()));
     cv::Mat color_matrix;
     fs["color_matrix"] >> color_matrix;
-    if (color_matrix.empty() || color_matrix.type() != CV_64FC3 ||
-        color_matrix.rows != 3 || color_matrix.cols != 3)
+    if (color_matrix.empty() || color_matrix.rows != 3 || color_matrix.cols != 3)
         throw std::runtime_error("Invalid calibration file " + filename +
-                                 ": color_matrix must be a 3x3 CV_64F matrix");
+                                 ": color_matrix must be a 3x3 matrix");
+    color_matrix.convertTo(color_matrix, CV_64FC3);
     if (fs["final_error"].type() != cv::FileNode::REAL ||
         fs["reference_exposure"].type() != cv::FileNode::REAL)
         throw std::runtime_error("Invalid calibration file " + filename +
