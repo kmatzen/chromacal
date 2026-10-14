@@ -1,12 +1,13 @@
 // Generate the *Lumetri* .cube from a calibration preset — the same
 // display-referred cube the effect's "Export .cube for Lumetri" writes
-// (write_display_cube: bakes the sRGB<->working transcode that Premiere's
-// sRGB-managed Input LUT wraps around the LUT). Use it to test the Lumetri path
-// reproducibly without the effect's save dialog.
+// (write_effect_cube: the effect's exact transform, encode(CCM*toneCurve(in))
+// with a working-gamma encode, no sRGB compensation). Use it to test the
+// Lumetri path reproducibly without the effect's save dialog.
 //
-//   chromacal_cube <preset.cmcal> <out.cube> [gamma=2.4]
+//   chromacal_cube <preset.cmcal> <out.cube> [gamma=2.4] [--srgb]
 //
 // gamma must match the sequence's SDR gamma (2.4 for Rec.709; 2.2/1.96 if set).
+// --srgb uses the legacy sRGB-managed bake (write_display_cube).
 
 #include "solve_core.h"
 

@@ -14,7 +14,8 @@ namespace chromacal_ppro {
 // non-null, also bake the calibration into a .cube LUT.
 static SolveResult run_solve(const cv::Mat& image, const std::string* cube_path,
                              int lut_size, int chart = 0,
-                             const std::string& reference_path = std::string()) {
+                             const std::string& reference_path = std::string(),
+                             double gamma = 2.4) {
     SolveResult r;
 
     if (image.empty()) {
@@ -71,10 +72,8 @@ static SolveResult run_solve(const cv::Mat& image, const std::string* cube_path,
     chromacal::Solver solver;
     try {
         solver.solve(patches);
-        if (cube_path)
-            chromacal::write_cube(solver, *cube_path, lut_size, "chromacal");
     } catch (const std::exception& e) {
-        r.error = std::string("solve()/write_cube() failed: ") + e.what();
+        r.error = std::string("solve() failed: ") + e.what();
         return r;
     }
 
@@ -87,6 +86,20 @@ static SolveResult run_solve(const cv::Mat& image, const std::string* cube_path,
     for (int i = 0; i < 4 && i < static_cast<int>(luma.size()); ++i)
         r.luma[i] = luma[i];
 
+    // Bake the effect's exact transform (gamma-encoded + clamped) so the .cube
+    // is display-referred — loadable directly as a Lumetri Input LUT. (The old
+    // chromacal::write_cube emitted LINEAR unclamped values, which are wrong for
+    // a display-referred LUT slot.)
+    if (cube_path) {
+        try {
+            if (!write_effect_cube(luma.data(), r.ccm.data(), *cube_path, lut_size, gamma))
+                throw std::runtime_error("could not write " + *cube_path);
+        } catch (const std::exception& e) {
+            r.error = std::string("write_effect_cube() failed: ") + e.what();
+            return r;
+        }
+    }
+
     r.final_error = solver.get_final_error();
     // ok reflects an actual converged solve, not just "no exception thrown":
     // solve() can finish with a non-converged (unusable) solution and still
@@ -98,14 +111,15 @@ static SolveResult run_solve(const cv::Mat& image, const std::string* cube_path,
 }
 
 SolveResult solve_from_image(const std::string& image_path,
-                             const std::string& cube_path, int lut_size) {
+                             const std::string& cube_path, int lut_size,
+                             double gamma) {
     cv::Mat image = cv::imread(image_path, cv::IMREAD_COLOR);
     if (image.empty()) {
         SolveResult r;
         r.error = "Failed to load image: " + image_path;
         return r;
     }
-    return run_solve(image, &cube_path, lut_size);
+    return run_solve(image, &cube_path, lut_size, 0, std::string(), gamma);
 }
 
 SolveResult solve_from_bgra_f32(const float* bgra, int width, int height,

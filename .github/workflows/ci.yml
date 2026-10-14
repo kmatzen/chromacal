@@ -78,17 +78,29 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$PREFIX" >> "$GITHUB_ENV"
           echo "DYLD_LIBRARY_PATH=$PREFIX/lib:$DYLD_LIBRARY_PATH" >> "$GITHUB_ENV"
 
+      - name: Install Python test deps
+        run: pip install pybind11 pytest
+
       - name: Configure
         # BUILD_PPRO builds the plugin core + CLIs and registers the plugin CTests
         # (ppro_core_smoke, cube_reproduces_effect). The native effect / UXP addon
         # stay skipped here (they need the gated Adobe SDKs).
-        run: cmake -B build -DCHROMACAL_BUILD_TESTS=ON -DCHROMACAL_BUILD_EXAMPLES=ON -DCHROMACAL_BUILD_PPRO=ON -DCMAKE_BUILD_TYPE=Release
+        # BUILD_PYTHON builds the pybind11 extension so the Python bindings are
+        # exercised by the pytest step below.
+        run: cmake -B build -DCHROMACAL_BUILD_TESTS=ON -DCHROMACAL_BUILD_EXAMPLES=ON -DCHROMACAL_BUILD_PPRO=ON -DCHROMACAL_BUILD_PYTHON=ON -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
       - name: Test
         run: cd build && ctest --output-on-failure
+
+      - name: Test (Python bindings)
+        # The extension is built into build/; the package (src/chromacal) imports
+        # it via a relative import, so stage the .so next to __init__.py.
+        run: |
+          cp build/_chromacal*.so src/chromacal/
+          PYTHONPATH=src python -m pytest tests/test_python.py -v
 
   # Proof that the macOS Premiere/AE effect (chromacal.plugin) actually BUILDS on
   # GitHub — fetches the gated Adobe SDKs from the private repo and runs the real

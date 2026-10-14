@@ -4,6 +4,7 @@
 #include "chromacal/solver.h"
 
 #include <cstdio>
+#include <cmath>
 #include <filesystem>
 #include <random>
 
@@ -170,6 +171,49 @@ TEST_CASE("Solver save and load round-trip", "[solver]") {
                WithinAbs(loaded.get_reference_exposure(), 1e-10));
 
     std::filesystem::remove(tmp);
+}
+
+TEST_CASE("Solver save/load preserves converged and report", "[solver]") {
+    // Regression test: save() used to drop the `converged` and `report` fields,
+    // so a loaded solver always reported converged=false with an empty report.
+    auto patches = make_synthetic_patches();
+    Solver solver;
+    solver.solve(patches);
+    REQUIRE(solver.converged());
+    REQUIRE_FALSE(solver.get_report().empty());
+
+    auto tmp = std::filesystem::temp_directory_path() / "chromacal_converged.yml";
+    solver.save(tmp.string());
+
+    Solver loaded;
+    loaded.load(tmp.string());
+
+    CHECK(loaded.converged());                // was false before the fix
+    CHECK_FALSE(loaded.get_report().empty()); // was empty before the fix
+
+    std::filesystem::remove(tmp);
+}
+
+TEST_CASE("Solver tone curve is bounded at pure black", "[solver]") {
+    // Regression test: the log-polynomial tone curve extrapolates below the
+    // chart's input range (down to pure black, input 0). Without the clamp,
+    // log(0) = -inf is fed to the cubic and infer() diverges to ~1e23 for pure
+    // black. The clamp bounds the value to a finite number. The exact value is
+    // data-dependent (the two-pass Jacobian-propagated solve changes the
+    // coefficients, so the clamped value here is ~1e4-1e5); the regression
+    // being caught is the 1e23 blow-up, so the bound is generous.
+    auto patches = make_synthetic_patches();
+    Solver solver;
+    solver.solve(patches);
+
+    cv::Mat black(1, 1, CV_64FC3, cv::Scalar(0.0, 0.0, 0.0));
+    cv::Mat out = solver.infer(black);
+    for (int c = 0; c < 3; ++c) {
+        double v = out.at<cv::Vec3d>(0, 0)[c];
+        CHECK(std::isfinite(v));
+        CHECK(v >= 0.0);
+        CHECK(v < 1e6); // bounded, not the 1e23 blow-up
+    }
 }
 
 TEST_CASE("Solver load rejects missing file", "[solver]") {

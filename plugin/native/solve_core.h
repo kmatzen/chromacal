@@ -31,9 +31,12 @@ struct SolveResult {
 ///
 /// This translation unit depends only on chromacal + OpenCV (no Adobe SDK), so
 /// it compiles and is verifiable independently via the CLI / smoke test.
+/// `gamma` is the working-space SDR gamma baked into the .cube (2.4 for
+/// Rec.709); the cube is display-referred (gamma-encoded + clamped) so it loads
+/// directly as a Lumetri Input LUT.
 SolveResult solve_from_image(const std::string& image_path,
                              const std::string& cube_path,
-                             int lut_size = 33);
+                             int lut_size = 33, double gamma = 2.4);
 
 /// Detect + solve directly from an in-memory, packed 32-bit-float BGRA frame
 /// (the layout Premiere hands a video effect as PrPixelFormat_BGRA_4444_32f),
