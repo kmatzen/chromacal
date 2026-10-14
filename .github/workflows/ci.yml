@@ -89,7 +89,7 @@ jobs:
         # exercised by the pytest step below. pybind11_DIR points CMake at the
         # pip-installed pybind11 (find_package can't locate it in site-packages).
         run: |
-          PYBIND11_DIR=$(python3 -c "import pybind11; print(pybind11.get_cmake_dir())")
+          PYBIND11_DIR="$(pip show pybind11 | awk '/^Location:/{print $2}')/pybind11/share/cmake/pybind11"
           cmake -B build -DCHROMACAL_BUILD_TESTS=ON -DCHROMACAL_BUILD_EXAMPLES=ON -DCHROMACAL_BUILD_PPRO=ON -DCHROMACAL_BUILD_PYTHON=ON -DCMAKE_BUILD_TYPE=Release -Dpybind11_DIR="$PYBIND11_DIR"
 
       - name: Build
