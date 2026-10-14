@@ -181,13 +181,22 @@ async function solve(frameNativePath) {
     return r;
 }
 
+// Platform-appropriate temp dir for the native frame export. Premiere's exporter
+// runs outside the UXP sandbox, so we need a plain path it can write (the UXP
+// temp folder isn't writable by it). /tmp on macOS; C:/Temp on Windows.
+function systemTempDir() {
+    const platform = (typeof navigator !== "undefined" && navigator.platform) || "";
+    return /win/i.test(platform) ? "C:/Temp" : "/tmp";
+}
+
 async function onCalibrateFromFrame() {
     try {
         if (!inPremiere()) { setStatus("Not in Premiere — use “Calibrate from image file”.", "err"); return; }
         // Plain filesystem path Premiere can write and the addon can read.
-        const outPath = "/tmp/chromacal_frame.png";
+        const outDir = systemTempDir();
+        const outPath = outDir + "/chromacal_frame.png";
         setStatus("Exporting current frame…");
-        await exportCurrentFrame(outPath, "/tmp/");
+        await exportCurrentFrame(outPath, outDir + "/");
         await solve(outPath);
     } catch (e) { setStatus(String(e.message || e), "err"); }
 }
@@ -199,9 +208,10 @@ async function onExportFrame() {
     try {
         if (!inPremiere()) { setStatus("Not in Premiere.", "err"); return; }
         const ts = Date.now();
-        const outPath = "/tmp/cc_export_" + ts + ".png";
+        const outDir = systemTempDir();
+        const outPath = outDir + "/cc_export_" + ts + ".png";
         setStatus("Exporting current frame…");
-        await exportCurrentFrame(outPath, "/tmp/");
+        await exportCurrentFrame(outPath, outDir + "/");
         setStatus("Exported " + outPath + " (effect state as shown). For parity: "
                   + "export once with Apply OFF (raw) and once ON (applied).", "ok");
     } catch (e) { setStatus(String(e.message || e), "err"); }

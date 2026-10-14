@@ -14,10 +14,12 @@
 namespace chromacal_ppro {
 
 /// Bake a calibration (4 log-poly tone-curve coeffs + row-major 3x3 CCM) into a
-/// display-referred Iridas/Resolve `.cube` for use as a Lumetri Input LUT.
-/// Reproduces the native effect's output: encode(CCM * toneCurve(input)).
-/// `gamma > 0` => pure power encode (SDR, e.g. 2.4); `gamma <= 0` => sRGB OETF.
-/// Creates parent directories. Returns true on success.
+/// display-referred Iridas/Resolve `.cube` for use as a Lumetri Input LUT, with
+/// the sRGB<->working transcode baked in. Use this only if your Premiere
+/// color-manages the Input LUT; otherwise it runs ~6% hot — for the effect's
+/// exact transform (no sRGB compensation) use write_effect_cube. `gamma > 0` =>
+/// pure power encode (SDR, e.g. 2.4); `gamma <= 0` => sRGB OETF. Creates parent
+/// directories. Returns true on success.
 bool write_display_cube(const double* luma, const double* ccm,
                         const std::string& path, int lut_size, double gamma);
 

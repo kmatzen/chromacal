@@ -128,7 +128,9 @@ if(CHROMACAL_BUILD_PYTHON)
 
     pybind11_add_module(_chromacal python/bindings.cpp)
     target_link_libraries(_chromacal PRIVATE chromacal)
-    install(TARGETS _chromacal DESTINATION .)
+    # Install the extension inside the chromacal/ package so the wheel ships
+    # chromacal/_chromacal.* (imported via a relative import in __init__).
+    install(TARGETS _chromacal DESTINATION chromacal)
 endif()
 
 # ------------------------------------------------------------------------------
@@ -192,8 +194,11 @@ if(CHROMACAL_BUILD_PPRO)
 endif()
 
 # ------------------------------------------------------------------------------
-# Install
+# Install (skipped for the Python wheel build, which ships only the chromacal/
+# package + the _chromacal extension; otherwise the library, headers, and CMake
+# config would be dropped into the wheel's site-packages root).
 # ------------------------------------------------------------------------------
+if(NOT CHROMACAL_BUILD_PYTHON)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -232,3 +237,4 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/chromacalConfigVersion.cmake"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/chromacal
 )
+endif()

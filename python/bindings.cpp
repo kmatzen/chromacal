@@ -6,25 +6,35 @@
 
 namespace py = pybind11;
 
-// Convert numpy (H, W, 3) uint8 BGR array to cv::Mat
-static cv::Mat numpy_to_mat_bgr(py::array_t<uint8_t> arr) {
-    if (!arr.is_c_contiguous())
-        throw std::runtime_error("Input array must be C-contiguous (use np.ascontiguousarray()); "
-                                 "non-contiguous arrays would be misread by cv::Mat");
+// Convert numpy (H, W, 3) uint8 BGR array to cv::Mat.
+// Rejects non-uint8 input: a float image (0-1) would otherwise be force-cast to
+// 0/1 bytes silently (py::array_t<uint8_t> force-casts by default).
+static cv::Mat numpy_to_mat_bgr(py::object obj) {
+    if (!py::isinstance<py::array>(obj))
+        throw std::invalid_argument("Expected a numpy array");
+    auto dt = obj.attr("dtype").cast<py::dtype>();
+    if (!dt.is(py::dtype::of<uint8_t>()))
+        throw std::invalid_argument(
+            std::string("Expected a uint8 (H, W, 3) array, got dtype ") + std::string(py::str(dt)));
+    py::array_t<uint8_t, py::array::c_style | py::array::forcecast> arr(obj);
     auto buf = arr.request();
     if (buf.ndim != 3 || buf.shape[2] != 3)
-        throw std::runtime_error("Expected (H, W, 3) uint8 array");
+        throw std::invalid_argument("Expected (H, W, 3) uint8 array");
     return cv::Mat(buf.shape[0], buf.shape[1], CV_8UC3, buf.ptr).clone();
 }
 
-// Convert numpy (H, W, 3) float64 RGB array to cv::Mat CV_64FC3
-static cv::Mat numpy_to_mat_f64(py::array_t<double> arr) {
-    if (!arr.is_c_contiguous())
-        throw std::runtime_error("Input array must be C-contiguous (use np.ascontiguousarray()); "
-                                 "non-contiguous arrays would be misread by cv::Mat");
+// Convert numpy (H, W, 3) float64 RGB array to cv::Mat CV_64FC3.
+static cv::Mat numpy_to_mat_f64(py::object obj) {
+    if (!py::isinstance<py::array>(obj))
+        throw std::invalid_argument("Expected a numpy array");
+    auto dt = obj.attr("dtype").cast<py::dtype>();
+    if (!dt.is(py::dtype::of<double>()))
+        throw std::invalid_argument(
+            std::string("Expected a float64 (H, W, 3) array, got dtype ") + std::string(py::str(dt)));
+    py::array_t<double, py::array::c_style | py::array::forcecast> arr(obj);
     auto buf = arr.request();
     if (buf.ndim != 3 || buf.shape[2] != 3)
-        throw std::runtime_error("Expected (H, W, 3) float64 array");
+        throw std::invalid_argument("Expected (H, W, 3) float64 array");
     return cv::Mat(buf.shape[0], buf.shape[1], CV_64FC3, buf.ptr).clone();
 }
 
@@ -96,7 +106,7 @@ PYBIND11_MODULE(_chromacal, m) {
     // -----------------------------------------------------------------------
     // Detect
     // -----------------------------------------------------------------------
-    m.def("detect", [](py::array_t<uint8_t> image, double exposure,
+    m.def("detect", [](py::object image, double exposure,
                        float lower, float upper, chromacal::ChartType chart,
                        py::object reference_lab) {
         cv::Mat mat = numpy_to_mat_bgr(image);
@@ -141,7 +151,7 @@ PYBIND11_MODULE(_chromacal, m) {
         .def("solve", &chromacal::Solver::solve,
              py::arg("patches"), py::arg("verbose") = false,
              "Fit the calibration model to detected patches.")
-        .def("infer", [](const chromacal::Solver& s, py::array_t<double> image) {
+        .def("infer", [](const chromacal::Solver& s, py::object image) {
             cv::Mat mat = numpy_to_mat_f64(image);
             cv::Mat result = s.infer(mat);
             return mat_to_numpy_f64(result);
@@ -182,7 +192,7 @@ PYBIND11_MODULE(_chromacal, m) {
           py::arg("title") = "chromacal",
           "Write the calibration as a Resolve/Iridas .cube 3D LUT file.");
 
-    m.def("apply_lut", [](py::array_t<uint8_t> image, const OCIO::ConstCPUProcessorRcPtr& proc) {
+    m.def("apply_lut", [](py::object image, const OCIO::ConstCPUProcessorRcPtr& proc) {
         cv::Mat mat = numpy_to_mat_bgr(image);
         cv::Mat rgb;
         cv::cvtColor(mat, rgb, cv::COLOR_BGR2RGB);

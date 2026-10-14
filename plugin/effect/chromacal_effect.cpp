@@ -10,6 +10,7 @@
 #include "chromacal_encode.h" // shared, unit-tested transfer functions
 #include "solve_core.h" // chromacal_ppro::solve_from_bgra_f32 / SolveResult
 
+#include <cmath>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -388,9 +389,15 @@ PF_Err Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[],
             if (d->export_path[0]) {
                 path = d->export_path; // user-chosen location
             } else {
+#if defined(_WIN32)
+                const char* appdata = getenv("APPDATA");
+                path = std::string(appdata ? appdata : ".") +
+                    "/Adobe/Common/LUTs/Technical/chromacal.cube";
+#else
                 const char* home = getenv("HOME");
                 path = std::string(home ? home : "/tmp") +
                     "/Library/Application Support/Adobe/Common/LUTs/Technical/chromacal.cube";
+#endif
             }
             bool ok = chromacal_ppro::write_effect_cube(d->luma, d->ccm, path, 33, gamma);
             snprintf(out_data->return_msg, PF_MAX_EFFECT_MSG_LEN,
@@ -457,6 +464,7 @@ PF_Err Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[],
                 ToneCurve(static_cast<double>(i) / kToneLUT, d->luma));
     }
     auto tone = [&](double c) -> double {
+        if (!std::isfinite(c)) return 0.0; // NaN/inf -> black (avoids an OOB LUT index)
         if (c <= 0.0) return toneLUT[0];
         if (c >= 1.0) return ToneCurve(c, d->luma); // exact for super-white
         double x = c * kToneLUT;

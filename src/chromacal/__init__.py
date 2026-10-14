@@ -21,7 +21,8 @@ Usage::
 
 __version__ = "0.1.1"
 
-from _chromacal import (
+from ._chromacal import (
+    ChartType,
     LUT,
     NormalityTestResults,
     PatchStatistics,
@@ -35,6 +36,7 @@ from _chromacal import (
 
 __all__ = [
     "__version__",
+    "ChartType",
     "detect",
     "filter_normal",
     "Solver",

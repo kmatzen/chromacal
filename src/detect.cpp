@@ -104,7 +104,7 @@ double shapiro_wilk_test(const std::vector<double>& data) {
     // Approximate expected normal order statistics
     std::vector<double> m(n);
     for (int i = 0; i < n; ++i) {
-        double p = (i + 0.375) / (n + 0.25);
+        double p = (i + 1.0 - 0.375) / (n + 0.25);
         // Rational approximation of the normal quantile
         double t = std::sqrt(-2.0 * std::log(p < 0.5 ? p : 1.0 - p));
         double c0 = 2.515517, c1 = 0.802853, c2 = 0.010328;
@@ -152,19 +152,30 @@ double mardia_skewness_test(const std::vector<cv::Vec3d>& pixels, const cv::Vec3
     cv::Matx33d cov_inv;
     if (cv::invert(covariance, cov_inv) == 0) return 0.0; // singular covariance -> skip test
 
-    double b1p = 0.0;
-    for (int i = 0; i < n; ++i) {
-        cv::Vec3d di = pixels[i] - mean;
-        for (int j = 0; j < n; ++j) {
-            cv::Vec3d dj = pixels[j] - mean;
-            double gij = 0.0;
-            for (int a = 0; a < 3; ++a)
-                for (int b = 0; b < 3; ++b)
-                    gij += di[a] * cov_inv(a, b) * dj[b];
-            b1p += gij * gij * gij;
-        }
+    // O(n) closed form (validated against the O(n^2) pairwise sum): the b1p
+    // double sum expands to a contraction of the third central-moment tensor T
+    // with the inverse covariance, so no i/j pair loop is needed:
+    //   sum_{i,j} (d_i' C d_j)^3 = sum_{a,b,c,d,e,f} C[a,b] C[c,d] C[e,f]
+    //                              * T[a,c,e] * T[b,d,f]
+    //   T[a,c,e] = sum_i d_i[a] d_i[c] d_i[e]
+    double T[3][3][3] = {};
+    for (const auto& px : pixels) {
+        cv::Vec3d d = px - mean;
+        for (int a = 0; a < 3; ++a)
+            for (int c = 0; c < 3; ++c)
+                for (int e = 0; e < 3; ++e)
+                    T[a][c][e] += d[a] * d[c] * d[e];
     }
-    b1p /= (static_cast<double>(n) * n);
+    double sum = 0.0;
+    for (int a = 0; a < 3; ++a)
+        for (int b = 0; b < 3; ++b)
+            for (int c = 0; c < 3; ++c)
+                for (int d = 0; d < 3; ++d)
+                    for (int e = 0; e < 3; ++e)
+                        for (int f = 0; f < 3; ++f)
+                            sum += cov_inv(a, b) * cov_inv(c, d) * cov_inv(e, f) *
+                                   T[a][c][e] * T[b][d][f];
+    double b1p = sum / (static_cast<double>(n) * n);
 
     double stat = n * b1p / 6.0;
     double df = 10.0; // p*(p+1)*(p+2)/6 where p=3
@@ -333,15 +344,51 @@ double patch_reliability(const std::vector<cv::Vec3d>& pixels, const cv::Vec3d& 
     int n = static_cast<int>(pixels.size());
     if (n < 4) return 1.0;
 
-    cv::Matx33d cov_inv;
-    cv::invert(covariance, cov_inv, cv::DECOMP_SVD);
+    // Robust (mean, covariance): the input (mean, covariance) is computed from
+    // ALL pixels, so the very outliers we want to detect inflate the covariance
+    // and bias the mean, which reduces their own Mahalanobis distance and hides
+    // them. Iterate: recompute (mean, covariance) from the current inliers
+    // (chi-square(3) 99th percentile) until the inlier set stabilizes.
+    const double kThreshold = 11.345; // chi-square(3) upper-1%
+    cv::Vec3d rob_mean = mean;
+    cv::Matx33d rob_cov = covariance;
+    for (int iter = 0; iter < 6; ++iter) {
+        cv::Matx33d cov_inv;
+        if (cv::invert(rob_cov, cov_inv, cv::DECOMP_SVD) == 0) break;
+        std::vector<char> in(n, 1);
+        for (int i = 0; i < n; ++i) {
+            cv::Vec3d d = pixels[i] - rob_mean;
+            double m2 = 0.0;
+            for (int a = 0; a < 3; ++a)
+                for (int b = 0; b < 3; ++b)
+                    m2 += d[a] * cov_inv(a, b) * d[b];
+            if (m2 > kThreshold) in[i] = 0;
+        }
+        int n_in = 0;
+        for (int i = 0; i < n; ++i) n_in += in[i];
+        if (n_in < 4) break; // too few inliers to estimate a covariance
+        cv::Vec3d new_mean(0, 0, 0);
+        for (int i = 0; i < n; ++i) if (in[i]) new_mean += pixels[i];
+        new_mean /= n_in;
+        cv::Matx33d new_cov = cv::Matx33d::zeros();
+        for (int i = 0; i < n; ++i) {
+            if (!in[i]) continue;
+            cv::Vec3d d = pixels[i] - new_mean;
+            for (int a = 0; a < 3; ++a)
+                for (int b = 0; b < 3; ++b)
+                    new_cov(a, b) += d[a] * d[b];
+        }
+        new_cov *= (1.0 / (n_in - 1));
+        rob_mean = new_mean;
+        rob_cov = new_cov;
+    }
 
-    // chi-square(3) upper-1% critical value: ~1% of clean Gaussian pixels lie
-    // beyond it. Specular highlights / occlusions produce far more.
-    const double kThreshold = 11.345;
+    // Final outlier count with the robust (mean, covariance).
+    cv::Matx33d cov_inv;
+    if (cv::invert(rob_cov, cov_inv, cv::DECOMP_SVD) == 0) return 1.0;
     int outliers = 0;
     for (const auto& px : pixels) {
-        cv::Vec3d d = px - mean;
+        cv::Vec3d d = px - rob_mean;
         double m2 = 0.0;
         for (int a = 0; a < 3; ++a)
             for (int b = 0; b < 3; ++b)
@@ -386,9 +433,19 @@ std::vector<PatchStatistics> detect(const cv::Mat& image, double exposure,
         (reference_lab && reference_lab->size() >= num_patches) ? *reference_lab : kReferenceLab;
     if (ref.size() < num_patches) return result; // SG without a reference -> can't solve
 
-    // Detect ColorChecker
+    // Detect ColorChecker.
+    // OpenCV 4.x: process(image, ColorChart, nc) -- chart type is the 2nd arg.
+    // OpenCV 5.x: process(image, nc) -- the 2nd arg became the number of charts,
+    // and the chart type is set via setColorChartType (MCC24 == 0 would otherwise
+    // mean "find 0 charts", silently failing Classic detection).
     auto detector = cv::mcc::CCheckerDetector::create();
-    if (!detector->process(image, sg ? cv::mcc::SG140 : cv::mcc::MCC24)) {
+#if CV_VERSION_MAJOR >= 5
+    detector->setColorChartType(sg ? cv::mcc::SG140 : cv::mcc::MCC24);
+    if (!detector->process(image, 1))
+#else
+    if (!detector->process(image, sg ? cv::mcc::SG140 : cv::mcc::MCC24))
+#endif
+    {
         return result; // No chart found
     }
 

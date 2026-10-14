@@ -2,6 +2,7 @@
 
 #include <ceres/ceres.h>
 #include <cmath>
+#include <functional>
 #include <iostream>
 
 namespace chromacal {
@@ -10,20 +11,59 @@ namespace chromacal {
 // Ceres cost functions (see solver.h for algorithm description)
 // ---------------------------------------------------------------------------
 
+// (Sigma)^{-1/2} * sqrt(n) via SVD, for Mahalanobis weighting. The per-pixel
+// covariance is Sigma; the patch mean (average of n pixels) has covariance
+// Sigma/n, whose inverse sqrt is sqrt(n) times the per-pixel inverse sqrt.
+static cv::Matx33d mahalanobis_weighting(const cv::Matx33d& cov, int pixel_count) {
+    cv::Matx33d U, Vt;
+    cv::Vec3d sv;
+    cv::SVD::compute(cov, sv, U, Vt);
+    cv::Matx33d D_inv_sqrt = cv::Matx33d::zeros();
+    for (int i = 0; i < 3; ++i)
+        D_inv_sqrt(i, i) = 1.0 / std::sqrt(std::max(sv[i], 1e-12));
+    cv::Matx33d w = U * D_inv_sqrt * U.t();
+    if (pixel_count > 1)
+        w *= std::sqrt(static_cast<double>(pixel_count));
+    return w;
+}
+
+// Output-space Mahalanobis weighting (J * Sigma_in * J^T)^{-1/2} * sqrt(n).
+// The input covariance is in the gamma-encoded (display) RGB space, but the
+// residuals are in linear RGB (the CCM output). The transform is
+// output = CCM * tone(input), so the Jacobian at the input mean is
+// J = CCM * diag(tone'(input)). Propagating Sigma_in through J gives the
+// covariance of the residual; weighting by its inverse sqrt is the correct
+// Mahalanobis metric in output space. Evaluated at the CONVERGED parameters
+// (two-pass solve), so the SVD stays out of the autodiff operator().
+static cv::Matx33d output_space_weighting(const cv::Matx33d& input_cov, const double* ccm,
+                                          const std::vector<double>& luma,
+                                          const cv::Vec3d& input_mean, int pixel_count) {
+    auto tone_deriv = [&](double x) {
+        double raw_log = std::log(x + 1e-6);
+        if (raw_log < std::log(1e-2)) return 0.0; // log clamp active -> flat
+        double logx = raw_log;
+        double adj = std::exp(luma[0] + luma[1]*logx + luma[2]*logx*logx +
+                              luma[3]*logx*logx*logx);
+        return adj * (luma[1] + 2*luma[2]*logx + 3*luma[3]*logx*logx) / (x + 1e-6);
+    };
+    double dr = tone_deriv(input_mean[0]);
+    double dg = tone_deriv(input_mean[1]);
+    double db = tone_deriv(input_mean[2]);
+
+    cv::Matx33d J = {
+        ccm[0]*dr, ccm[1]*dg, ccm[2]*db,
+        ccm[3]*dr, ccm[4]*dg, ccm[5]*db,
+        ccm[6]*dr, ccm[7]*dg, ccm[8]*db
+    };
+    cv::Matx33d sum_out = J * input_cov * J.t();
+    return mahalanobis_weighting(sum_out, pixel_count);
+}
+
 struct ColorCalibrationCost {
-    ColorCalibrationCost(const cv::Vec3d& input_mean, const cv::Matx33d& input_covariance,
+    ColorCalibrationCost(const cv::Vec3d& input_mean, const cv::Matx33d& sqrt_inv_cov,
                          const cv::Vec3d& reference, double exposure, double reference_exposure)
         : input_mean(input_mean), reference_color(reference), exposure(exposure),
-          reference_exposure(reference_exposure) {
-        // Compute Sigma^{-1/2} via SVD for numerically stable Mahalanobis weighting
-        cv::Matx33d U, Vt;
-        cv::Vec3d sv;
-        cv::SVD::compute(input_covariance, sv, U, Vt);
-        cv::Matx33d D_inv_sqrt = cv::Matx33d::zeros();
-        for (int i = 0; i < 3; ++i)
-            D_inv_sqrt(i, i) = 1.0 / std::sqrt(std::max(sv[i], 1e-12));
-        sqrt_inv_cov = U * D_inv_sqrt * U.t();
-    }
+          reference_exposure(reference_exposure), sqrt_inv_cov(sqrt_inv_cov) {}
 
     template <typename T> static T lab_finv(const T& t) {
         T delta = T(6.0 / 29.0);
@@ -152,8 +192,6 @@ void Solver::solve(const std::vector<PatchStatistics>& patches, bool verbose) {
     std::vector<double> luma = {0.0, 1.0, 0.0, 0.0};
     double ccm[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
 
-    ceres::Problem problem;
-
     for (const auto& p : patches)
         if (p.exposure <= 0.0)
             throw std::invalid_argument("Patch exposure must be positive (got <= 0): the "
@@ -171,59 +209,103 @@ void Solver::solve(const std::vector<PatchStatistics>& patches, bool verbose) {
     // patch is ~19.5.
     const double kNeutralChromaThreshold = 5.0;
 
-    for (const auto& p : patches) {
-        // Down-weight unreliable patches (contaminated by specular highlights,
-        // occlusions, etc.) by scaling the loss by reliability^2 -- equivalent
-        // to scaling the residual by the reliability. reliability == 1 leaves
-        // the plain Huber loss untouched, so clean patches are unaffected.
-        double rw = p.reliability;
-        ceres::LossFunction* loss = new ceres::HuberLoss(3.0);
-        if (p.reliability < 1.0)
-            loss = new ceres::ScaledLoss(loss, rw, ceres::TAKE_OWNERSHIP);
+    // Build the Ceres problem. The weighting function is a parameter so the
+    // same problem can be built with the input-space weighting (pass 1) or the
+    // output-space (Jacobian-propagated) weighting (pass 2). The residual blocks
+    // capture luma/ccm by pointer, so each pass refines the previous pass's
+    // solution.
+    auto build_problem = [&](ceres::Problem& problem,
+                             const std::function<cv::Matx33d(const PatchStatistics&)>& weight) {
+        for (const auto& p : patches) {
+            // Down-weight unreliable patches (contaminated by specular highlights,
+            // occlusions, etc.) by scaling the loss by reliability^2 -- equivalent
+            // to scaling the residual by the reliability. reliability == 1 leaves
+            // the plain Huber loss untouched, so clean patches are unaffected.
+            double rw = p.reliability;
+            ceres::LossFunction* loss = new ceres::HuberLoss(3.0);
+            if (p.reliability < 1.0)
+                loss = new ceres::ScaledLoss(loss, rw, ceres::TAKE_OWNERSHIP);
 
-        problem.AddResidualBlock(
-            new ceres::AutoDiffCostFunction<ColorCalibrationCost, 3, 4, 9>(
-                new ColorCalibrationCost(p.mean, p.covariance, p.reference_lab, p.exposure, ref_exp)),
-            loss, luma.data(), ccm);
-
-        double chroma = std::hypot(p.reference_lab[1], p.reference_lab[2]);
-        if (chroma < kNeutralChromaThreshold) {
             problem.AddResidualBlock(
-                new ceres::AutoDiffCostFunction<WhiteBalanceCost, 2, 4, 9>(
-                    new WhiteBalanceCost(p.mean, p.exposure, ref_exp)),
-                new ceres::ScaledLoss(nullptr, 0.1 * rw, ceres::TAKE_OWNERSHIP), luma.data(), ccm);
-        }
-    }
+                new ceres::AutoDiffCostFunction<ColorCalibrationCost, 3, 4, 9>(
+                    new ColorCalibrationCost(p.mean, weight(p), p.reference_lab, p.exposure,
+                                             ref_exp)),
+                loss, luma.data(), ccm);
 
-    // Bounds on CCM
-    for (int i = 0; i < 9; ++i) {
-        if (i == 0 || i == 4 || i == 8) {
-            problem.SetParameterLowerBound(ccm, i, 0.1);
-            problem.SetParameterUpperBound(ccm, i, 3.0);
-        } else {
-            problem.SetParameterLowerBound(ccm, i, -1.5);
-            problem.SetParameterUpperBound(ccm, i, 1.5);
+            double chroma = std::hypot(p.reference_lab[1], p.reference_lab[2]);
+            if (chroma < kNeutralChromaThreshold) {
+                problem.AddResidualBlock(
+                    new ceres::AutoDiffCostFunction<WhiteBalanceCost, 2, 4, 9>(
+                        new WhiteBalanceCost(p.mean, p.exposure, ref_exp)),
+                    new ceres::ScaledLoss(nullptr, 0.1 * rw, ceres::TAKE_OWNERSHIP), luma.data(),
+                    ccm);
+            }
         }
-    }
+
+        // Bounds on CCM
+        for (int i = 0; i < 9; ++i) {
+            if (i == 0 || i == 4 || i == 8) {
+                problem.SetParameterLowerBound(ccm, i, 0.1);
+                problem.SetParameterUpperBound(ccm, i, 3.0);
+            } else {
+                problem.SetParameterLowerBound(ccm, i, -1.5);
+                problem.SetParameterUpperBound(ccm, i, 1.5);
+            }
+        }
+    };
 
     ceres::Solver::Options options;
     options.linear_solver_type = ceres::DENSE_QR;
-    options.minimizer_progress_to_stdout = verbose;
+    options.minimizer_progress_to_stdout = false; // pass 1 is silent; pass 2 reports
     options.max_num_iterations = 100;
     options.function_tolerance = 1e-8;
     options.gradient_tolerance = 1e-10;
     options.parameter_tolerance = 1e-10;
 
+    // Pass 1: input-space Mahalanobis weighting. Solves for (luma, ccm) using
+    // the per-pixel covariance directly. This is an approximation (it assumes
+    // the transform's Jacobian is ~identity), but it gives a good estimate of
+    // the Jacobian for pass 2.
+    double pass1_cost = 0.0;
+    bool pass1_usable = false;
+    {
+        ceres::Problem problem;
+        build_problem(problem, [&](const PatchStatistics& p) {
+            return mahalanobis_weighting(p.covariance, p.pixel_count);
+        });
+        ceres::Solver::Summary s1;
+        ceres::Solve(options, &problem, &s1);
+        pass1_cost = s1.final_cost;
+        pass1_usable = s1.IsSolutionUsable();
+    }
+
+    // Pass 2: output-space (Jacobian-propagated) Mahalanobis weighting. The
+    // Jacobian J = CCM * diag(tone'(input)) is evaluated at the pass-1 solution,
+    // so the SVD stays out of the autodiff operator(). The weighting is frozen
+    // for the duration of this pass (a Gauss-Newton fixed point). This is the
+    // correct Mahalanobis metric in the output (linear RGB) space where the
+    // residuals live.
     ceres::Solver::Summary summary;
-    ceres::Solve(options, &problem, &summary);
+    {
+        ceres::Problem problem;
+        build_problem(problem, [&](const PatchStatistics& p) {
+            return output_space_weighting(p.covariance, ccm, luma, p.mean, p.pixel_count);
+        });
+        options.minimizer_progress_to_stdout = verbose;
+        ceres::Solve(options, &problem, &summary);
+    }
     if (verbose) std::cout << summary.FullReport() << std::endl;
 
     result_ = std::make_unique<CalibrationResult>();
     result_->luma_params = luma;
     result_->color_matrix = cv::Mat(3, 3, CV_64F, ccm).clone();
-    result_->final_error = summary.final_cost;
+    // Report the pass-1 (input-space) cost as final_error: the pass-2 objective
+    // uses a different weighting (Jacobian-propagated), so its cost is not
+    // directly comparable across solves. The pass-1 cost is the same objective
+    // every time, so it is a stable metric for "did the calibration improve?".
+    result_->final_error = pass1_cost;
     result_->report = summary.BriefReport();
-    result_->converged = summary.IsSolutionUsable();
+    result_->converged = pass1_usable && summary.IsSolutionUsable();
     result_->reference_exposure = ref_exp;
 }
 
@@ -250,9 +332,15 @@ cv::Mat Solver::infer(const cv::Mat& image) const {
         for (int x = 0; x < image.cols; ++x) {
             const cv::Vec3d& in = in_row[x];
 
-            double log_r = std::log(in[0] + 1e-6);
-            double log_g = std::log(in[1] + 1e-6);
-            double log_b = std::log(in[2] + 1e-6);
+            // Clamp the low end of the log argument to log(1e-2) so the cubic
+            // tone curve is bounded at input 0 (without it, log(1e-6) = -13.8 and
+            // the cubic extrapolates to ~1e23 for pure black). The chart's fit
+            // range and the high end are untouched. Matches the effect's ToneCurve
+            // guard. (A clamp to the chart's own darkest input would be tighter
+            // but breaks the fixed-point/ramp test, so we use a fixed floor.)
+            double log_r = std::max(std::log(in[0] + 1e-6), std::log(1e-2));
+            double log_g = std::max(std::log(in[1] + 1e-6), std::log(1e-2));
+            double log_b = std::max(std::log(in[2] + 1e-6), std::log(1e-2));
 
             double ar = std::exp(l0 + l1*log_r + l2*log_r*log_r + l3*log_r*log_r*log_r);
             double ag = std::exp(l0 + l1*log_g + l2*log_g*log_g + l3*log_g*log_g*log_g);
@@ -306,6 +394,8 @@ void Solver::save(const std::string& filename) const {
     fs << "color_matrix" << result_->color_matrix;
     fs << "final_error" << result_->final_error;
     fs << "reference_exposure" << result_->reference_exposure;
+    fs << "converged" << result_->converged;
+    fs << "report" << result_->report;
 }
 
 void Solver::load(const std::string& filename) {
@@ -333,6 +423,12 @@ void Solver::load(const std::string& filename) {
     result_->color_matrix = color_matrix.clone();
     fs["final_error"] >> result_->final_error;
     fs["reference_exposure"] >> result_->reference_exposure;
+    // converged/report were added after older files were written; keep the
+    // struct defaults (converged=true, report="") if the keys are absent.
+    if (fs["converged"].type() != cv::FileNode::NONE)
+        fs["converged"] >> result_->converged;
+    if (fs["report"].type() != cv::FileNode::NONE)
+        fs["report"] >> result_->report;
 }
 
 } // namespace chromacal
