@@ -79,7 +79,7 @@ jobs:
           echo "DYLD_LIBRARY_PATH=$PREFIX/lib:$DYLD_LIBRARY_PATH" >> "$GITHUB_ENV"
 
       - name: Install Python test deps
-        run: pip install pybind11 pytest
+        run: pip install pybind11 pytest numpy
 
       - name: Configure
         # BUILD_PPRO builds the plugin core + CLIs and registers the plugin CTests
