@@ -3,6 +3,46 @@
 All notable changes to chromacal. Versions follow the plugin's
 `CFBundleShortVersionString` / PiPL `AE_Effect_Version`.
 
+## [0.2.0] - 2026-11-26
+
+Python package, C++ core, and the macOS plugin, 16 commits past 0.1.1. The solver
+and detector changed, so calibration results on difficult frames differ from 0.1.1;
+presets saved by 0.1.1 load unchanged.
+
+### Fixed
+- **Detection: chi-square tail** — `chi_square_sf` truncated its power series at 200
+  terms, so large statistics returned ~1.0 instead of decaying to ~0, and the Mardia
+  skewness test passed the contaminated patches it should reject hardest
+  (specular highlights, occlusion). Replaced with the standard two-regime
+  incomplete-gamma evaluation, verified against `scipy.stats.chi2.sf`. (#21)
+- **Detection: input dtype** — `detect()` assumed 8-bit BGR and scaled by 1/255
+  whatever arrived, so a 16-bit or float frame produced a garbage calibration with
+  no error. It now raises `std::invalid_argument`. (#21)
+- **White-balance patch selection**, a Shapiro–Wilk off-by-one, and a tone-curve log
+  clamp that blew up to 1e23 at black. (#21, `90e67b6`)
+- **Preset save/load** — the `color_matrix` type check rejected valid presets,
+  because OpenCV's `FileStorage` does not preserve `CV_64FC3`. (`844b74b`)
+- **OpenCV 5.x** compatibility, including the `CCheckerDetector` API branch, plus an
+  AppleClang OpenMP fallback. (`624606e`)
+- Eleven audit findings (6 medium, 4 low), and in the plugin: `write_effect_cube`,
+  gamma 2.4, a NaN guard, and the Windows LUT path. (`b01a14b`, `90e67b6`)
+
+### Changed
+- **Solver** — Mardia skewness is O(n), was O(n²). Covariance is now per-mean with
+  residuals scaled by √pixel_count; reliability covariance excludes outliers
+  iteratively; the solve propagates the Jacobian in two passes (input-space, then
+  output-space weighting). (`90e67b6`)
+- **Detection cost** — per-patch sampling no longer allocates and zeroes a
+  full-frame mask for every patch. (#21)
+
+### Added
+- `solve_core` tests, and support for local and cloud build/test runs. (#22)
+
+### Packaging
+- macOS wheels build on `macos-15` with target 15.8, the Linux dependency prefix
+  builds a pinned yaml-cpp before OpenColorIO, CI pins the interpreter, and the
+  dependency cache key is content-based. All seven CI jobs are green on main.
+
 ## [0.1.1] - 2026-05-24
 
 First release of the native Premiere/After Effects plugin. Builds (macOS + Windows)
