@@ -64,8 +64,8 @@ struct ChromacalSeqData {
 #define CHROMACAL_MAGIC 0x43484D43 // 'CHMC'
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 1
-#define BUG_VERSION   1
+#define MINOR_VERSION 2
+#define BUG_VERSION   0
 #define STAGE_VERSION PF_Stage_RELEASE
 #define BUILD_VERSION 1
 
