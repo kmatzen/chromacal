@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/cvdeps
-          key: linux-cvdeps-ceres2.2.0-ocio2.5.1-opencv4.13.0-v1
+          key: linux-cvdeps-ceres2.2.0-ocio2.5.1-opencv4.13.0-${{ hashFiles('scripts/build_linux_devdeps.sh') }}
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -78,6 +78,11 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$PREFIX" >> "$GITHUB_ENV"
           echo "DYLD_LIBRARY_PATH=$PREFIX/lib:$DYLD_LIBRARY_PATH" >> "$GITHUB_ENV"
 
+      # Pin the interpreter: unpinned, CMake builds the extension for Homebrew's python3 while pytest runs the runner's own.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install Python test deps
         run: pip install pybind11 pytest numpy
 
@@ -90,7 +95,7 @@ jobs:
         # pip-installed pybind11 (find_package can't locate it in site-packages).
         run: |
           PYBIND11_DIR="$(pip show pybind11 | awk '/^Location:/{print $2}')/pybind11/share/cmake/pybind11"
-          cmake -B build -DCHROMACAL_BUILD_TESTS=ON -DCHROMACAL_BUILD_EXAMPLES=ON -DCHROMACAL_BUILD_PPRO=ON -DCHROMACAL_BUILD_PYTHON=ON -DCMAKE_BUILD_TYPE=Release -Dpybind11_DIR="$PYBIND11_DIR"
+          cmake -B build -DCHROMACAL_BUILD_TESTS=ON -DCHROMACAL_BUILD_EXAMPLES=ON -DCHROMACAL_BUILD_PPRO=ON -DCHROMACAL_BUILD_PYTHON=ON -DCMAKE_BUILD_TYPE=Release -Dpybind11_DIR="$PYBIND11_DIR" -DPython3_EXECUTABLE="$(command -v python)"
 
       - name: Build
         run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
