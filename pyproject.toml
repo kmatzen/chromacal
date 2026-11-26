@@ -92,5 +92,5 @@ before-all = [
 
 [tool.cibuildwheel.macos.environment]
 CMAKE_PREFIX_PATH = "/opt/homebrew;/usr/local"
-# The target must be >= the Homebrew bottles' minimum on the build image, and wheels.yml pins macos-15 to keep that at 15.0. On macos-latest (macOS 26) the bottles demand 26.0, and delocate says so.
-MACOSX_DEPLOYMENT_TARGET = "15.0"
+# Homebrew builds its bottles on the runner's own OS, so the floor equals that point release: delocate reports 15.8 for the macos-15 image, and 26.0 on macos-latest. wheels.yml pins macos-15 to keep support at macOS 15, so the target has to name the point release, not the major.
+MACOSX_DEPLOYMENT_TARGET = "15.8"
