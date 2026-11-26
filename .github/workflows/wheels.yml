@@ -20,7 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]
+        # macos-15, not macos-latest: the wheel's macOS floor follows the build image's Homebrew bottles.
+        os: [ubuntu-latest, macos-15]
 
     steps:
       - uses: actions/checkout@v4
