@@ -40,7 +40,9 @@ cmake --build "$WORK/ceres/build" -j"$(nproc)" && cmake --install "$WORK/ceres/b
 
 # OpenColorIO
 git clone --depth 1 --branch "$OCIO_VERSION" https://github.com/AcademySoftwareFoundation/OpenColorIO.git "$WORK/ocio"
+# OCIO 2.5.1's vendored yaml-cpp needs <cstdint> forced in: current GCC dropped the transitive include.
 cmake -S "$WORK/ocio" -B "$WORK/ocio/build" -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_FLAGS="-include cstdint" \
     -DOCIO_BUILD_APPS=OFF -DOCIO_BUILD_TESTS=OFF -DOCIO_BUILD_GPU_TESTS=OFF \
     -DOCIO_BUILD_PYTHON=OFF -DCMAKE_INSTALL_PREFIX="$PREFIX"
 cmake --build "$WORK/ocio/build" -j"$(nproc)" && cmake --install "$WORK/ocio/build"

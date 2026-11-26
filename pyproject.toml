@@ -92,4 +92,5 @@ before-all = [
 
 [tool.cibuildwheel.macos.environment]
 CMAKE_PREFIX_PATH = "/opt/homebrew;/usr/local"
-MACOSX_DEPLOYMENT_TARGET = "14.0"
+# Homebrew bottles now ship with a 14.8 minimum; delocate refuses to repair a wheel built for 14.0.
+MACOSX_DEPLOYMENT_TARGET = "14.8"
